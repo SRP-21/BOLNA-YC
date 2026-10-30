@@ -10,6 +10,21 @@ from db import SessionLocal, Event
 
 # In-memory subscribers for SSE
 _subscribers: list[asyncio.Queue] = []
+_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_loop(loop: asyncio.AbstractEventLoop):
+    """Set the running event loop for thread-safe event scheduling."""
+    global _loop
+    _loop = loop
+
+
+def _enqueue(q: asyncio.Queue, item: dict):
+    """Helper to safely put item into queue, dropping if full."""
+    try:
+        q.put_nowait(item)
+    except asyncio.QueueFull:
+        pass  # Drop if subscriber is too slow
 
 
 def log_event(event_type: str, message: str, task_id: Optional[int] = None):
@@ -34,11 +49,13 @@ def log_event(event_type: str, message: str, task_id: Optional[int] = None):
             "message": event.message,
             "task_id": event.task_id,
         }
-        for q in _subscribers:
-            try:
-                q.put_nowait(data)
-            except asyncio.QueueFull:
-                pass  # Drop if subscriber is too slow
+        subscribers_copy = list(_subscribers)
+        if _loop is not None and _loop.is_running():
+            for q in subscribers_copy:
+                _loop.call_soon_threadsafe(_enqueue, q, data)
+        else:
+            for q in subscribers_copy:
+                _enqueue(q, data)
     finally:
         db.close()
 

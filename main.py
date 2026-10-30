@@ -2,6 +2,7 @@
 Main FastAPI application.
 Voice-first daily planner — "a planner you talk to, that talks back."
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from db import init_db
 from scheduler import scheduler, reload_pending_tasks
+from events import set_loop
 from routes.voice import router as voice_router
 from routes.tasks import router as tasks_router
 from routes.events_routes import router as events_router
@@ -26,6 +28,7 @@ async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     # Startup
     logger.info("🚀 Starting Voice Planner...")
+    set_loop(asyncio.get_running_loop())
     init_db()
     logger.info("📦 Database initialized")
 
