@@ -172,6 +172,7 @@ def remove_task_job(task_id: int):
 def _schedule_next_recurrence(db, task: Task):
     """Create a new task instance for the next recurrence."""
     from agent.resolver import compute_next_recurrence
+    from timeutil import format_when
     next_dt = compute_next_recurrence(task.due_at, task.recurrence)
     if next_dt:
         new_task = Task(
@@ -187,8 +188,11 @@ def _schedule_next_recurrence(db, task: Task):
         db.commit()
         db.refresh(new_task)
         schedule_task_reminder(new_task.id, next_dt)
-        log_event("task_recurring", f"Next: {new_task.title} at {next_dt.strftime('%I:%M %p')}",
+        when_str = format_when(next_dt, now_ist(), task.language or "en")
+        log_event("task_recurring", f"Next: {new_task.title} {when_str}",
                   task_id=new_task.id)
+        return new_task
+    return None
 
 
 def reload_pending_tasks():

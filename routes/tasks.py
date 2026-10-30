@@ -158,17 +158,21 @@ async def reminder_reply(
 
         # Apply outcome
         from agent.replies import format_done, format_snoozed, format_cancelled, format_rescheduled
+        from timeutil import format_when
         reply_message = ""
         if outcome.outcome == "done":
             task.status = TaskStatus.DONE.value
             remove_task_job(task.id)
-            reply_message = format_done(task.title, reply_lang)
             log_event("task_done", f"Done: {task.title}", task_id=task.id)
 
             # Handle recurrence
+            next_when = None
             if task.recurrence:
                 from scheduler import _schedule_next_recurrence
-                _schedule_next_recurrence(db, task)
+                next_task = _schedule_next_recurrence(db, task)
+                if next_task and next_task.due_at:
+                    next_when = format_when(next_task.due_at, now_ist(), reply_lang)
+            reply_message = format_done(task.title, reply_lang, next_when=next_when)
 
         elif outcome.outcome == "snooze":
             minutes = outcome.minutes or 10
@@ -177,7 +181,8 @@ async def reminder_reply(
             task.due_at = to_ist_naive(new_due)
             task.snooze_count += 1
             schedule_task_reminder(task.id, new_due)
-            reply_message = format_snoozed(task.title, minutes, reply_lang)
+            until_when = format_when(new_due, now_ist(), reply_lang)
+            reply_message = format_snoozed(task.title, minutes, reply_lang, until=until_when)
             log_event("task_snoozed", f"Snoozed: {task.title} +{minutes}min", task_id=task.id)
 
         elif outcome.outcome == "reschedule":
@@ -186,7 +191,8 @@ async def reminder_reply(
                 task.due_at = to_ist_naive(resolved.dt)
                 task.status = TaskStatus.SCHEDULED.value
                 schedule_task_reminder(task.id, resolved.dt)
-                reply_message = format_rescheduled(task.title, resolved.dt.strftime('%I:%M %p'), reply_lang)
+                when_str = format_when(resolved.dt, now_ist(), reply_lang)
+                reply_message = format_rescheduled(task.title, when_str, reply_lang)
             else:
                 # Default: move to tomorrow same time
                 from datetime import timedelta
@@ -194,7 +200,8 @@ async def reminder_reply(
                 task.due_at = to_ist_naive(new_due)
                 task.status = TaskStatus.SCHEDULED.value
                 schedule_task_reminder(task.id, new_due)
-                reply_message = format_rescheduled(task.title, "tomorrow", reply_lang)
+                when_str = format_when(new_due, now_ist(), reply_lang)
+                reply_message = format_rescheduled(task.title, when_str, reply_lang)
             log_event("task_rescheduled", reply_message, task_id=task.id)
 
         elif outcome.outcome == "cancel":

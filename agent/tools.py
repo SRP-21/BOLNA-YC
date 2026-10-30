@@ -94,16 +94,19 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "cancel_task",
-            "description": "Cancel/delete a task. Use when the user says to remove a reminder.",
+            "description": "Cancel or remove a task reminder. Provide task_id and/or title.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "task_id": {
                         "type": "integer",
-                        "description": "ID of the task to cancel"
+                        "description": "ID of the task to cancel (if known)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title or keyword of the task to cancel"
                     },
                 },
-                "required": ["task_id"],
             },
         },
     },

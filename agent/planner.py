@@ -29,6 +29,7 @@ CRITICAL INSTRUCTIONS:
 - Omit `recurrence` for regular one-time tasks.
 - If the user is just saying hello or greeting without tasks ("Hello", "Hi, can you help me?"), do NOT call add_tasks. Greet them warmly and ask what they would like to plan.
 - If the user is correcting an existing task ("gym at 6, no, 7"), call `update_task`.
+- If the user asks to remove, cancel, or delete a task (e.g., "remove the meeting", "cancel gym"), call `cancel_task` with `task_id` or `title`.
 - Mirror the user's language (English, Hindi, Hinglish, Kannada-English mix).
 """
 
@@ -71,6 +72,25 @@ def _get_recent_turns(db, limit: int = 4) -> list[dict]:
     return turns
 
 
+def _is_question(text: str) -> bool:
+    """Check if the user input looks like a question."""
+    t = text.strip().lower()
+    if "?" in t:
+        return True
+    question_starts = (
+        "why", "what", "where", "when", "how", "who", "which", "whose", "whom",
+        "can you", "could you", "is it", "are you", "do you", "will you",
+        "kyun", "kyu", "kya", "kaise", "kab", "kaha", "kahan",
+        "क्यों", "क्या", "कैसे", "कब", "कहाँ", "किस",
+        "enu", "yake", "hege", "yelli", "yavaga", "yaru",
+        "ಏನು", "ಯಾಕೆ", "ಹೇಗೆ", "ಎಲ್ಲಿ", "ಯಾವಾಗ", "ಯಾರು"
+    )
+    for q in question_starts:
+        if t.startswith(q + " ") or t == q:
+            return True
+    return False
+
+
 async def process_turn(
     user_text: str, language: str = "en",
     now: Optional[datetime] = None
@@ -111,7 +131,7 @@ async def process_turn(
         response = await registry.llm.chat(messages, tools=TOOLS)
 
         task_changes = []
-        reply_text = response.get("content") or ""
+        reply_text = ""
 
         # Process tool calls
         if response.get("tool_calls"):
@@ -124,21 +144,42 @@ async def process_turn(
                         task_changes.append(change)
 
             # Generate natural spoken confirmation
-            reply_text = _generate_confirmation(task_changes, language)
-
-        # Fallback for conversational turns when no tools were called
-        if not reply_text:
+            reply_text = _generate_confirmation(task_changes, language, now=now)
+        else:
+            # Check if user asked to cancel/remove and tool wasn't invoked
             text_lower = user_text.lower()
-            if any(w in text_lower for w in ["hello", "hi", "hey", "help", "kya kar sakte ho", "namaste"]):
+            cancel_triggers = ["cancel", "remove", "delete", "hata do", "hatao", "radd karo", "raddu madi"]
+            found_trigger = None
+            for trigger in cancel_triggers:
+                if trigger in text_lower:
+                    found_trigger = trigger
+                    break
+            if found_trigger:
+                target = text_lower.split(found_trigger, 1)[1].replace("the", "").replace("my", "").strip()
+                if not target:
+                    target = text_lower.split(found_trigger, 1)[0].replace("the", "").replace("my", "").strip()
+                change = _handle_cancel_task(db, {"title": target})
+                task_changes.append(change)
+                reply_text = _generate_confirmation(task_changes, language, now=now)
+
+        # Fallback when no task actions were detected / performed
+        if not task_changes or not reply_text:
+            text_lower = user_text.lower().strip()
+            greetings = ["hello", "hi", "hey", "namaste", "namaskara", "namaskar"]
+            is_greeting = any(text_lower == g or text_lower.startswith(g + " ") for g in greetings)
+            if is_greeting:
                 if language == "hi":
                     reply_text = "नमस्ते! आज की अपनी योजना बताइए, मैं आपके रिमाइंडर सेट कर दूंगा।"
                 elif language == "kn":
                     reply_text = "ನಮಸ್ಕಾರ! ಇಂದಿನ ನಿಮ್ಮ ಯೋಜನೆಯನ್ನು ತಿಳಿಸಿ, ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸುತ್ತೇನೆ."
                 else:
                     reply_text = "Namaste! Tell me what you have planned today, and I'll set up your reminders."
+            elif _is_question(user_text):
+                from agent.replies import format_question_help
+                reply_text = format_question_help(language)
             else:
-                from agent.replies import get_template
-                reply_text = get_template("fallback", language)
+                from agent.replies import format_fallback
+                reply_text = format_fallback(language)
 
         # Save agent utterance
         agent_utt = Utterance(role="assistant", text=reply_text, language=language)
@@ -286,10 +327,40 @@ def _handle_update_task(db, args: dict, now: datetime) -> dict:
 
 def _handle_cancel_task(db, args: dict) -> dict:
     """Cancel a task."""
+    import difflib
     task_id = args.get("task_id")
-    task = db.query(Task).filter_by(id=task_id).first()
+    target_title = (args.get("title") or "").strip()
+
+    task = None
+    if task_id:
+        try:
+            task = db.query(Task).filter_by(id=int(task_id)).first()
+        except (ValueError, TypeError):
+            task = None
+
+    active_tasks = db.query(Task).filter(
+        Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
+    ).all()
+
+    if task and task.status == TaskStatus.CANCELLED.value:
+        task = None
+
+    if not task and target_title:
+        for t in active_tasks:
+            if target_title.lower() == t.title.lower() or target_title.lower() in t.title.lower():
+                task = t
+                break
+
     if not task:
-        return {"type": "error", "message": f"Task #{task_id} not found"}
+        candidates = [t.title for t in active_tasks]
+        lookup = target_title or (str(task_id) if task_id else "")
+        matches = difflib.get_close_matches(lookup, candidates, n=1, cutoff=0.3) if lookup and candidates else []
+        closest = matches[0] if matches else (candidates[0] if candidates else None)
+        return {
+            "type": "cancel_not_found",
+            "target": target_title or str(task_id or ""),
+            "closest": closest,
+        }
 
     task.status = TaskStatus.CANCELLED.value
     db.commit()
@@ -301,7 +372,27 @@ def _handle_cancel_task(db, args: dict) -> dict:
     return {"type": "cancelled", "task_id": task.id, "title": task.title}
 
 
-def _generate_confirmation(task_changes: list, language: str) -> str:
+def _generate_confirmation(task_changes: list, language: str, now: Optional[datetime] = None) -> str:
     """Generate a clean, spoken confirmation sentence in the user's language."""
-    from agent.replies import format_created
-    return format_created(task_changes, language)
+    from agent.replies import (
+        format_created, format_cancelled, format_cancel_not_found,
+        format_fallback
+    )
+    if not task_changes:
+        return format_fallback(language)
+
+    # Check for cancel actions
+    cancel_changes = [c for c in task_changes if c.get("type") in ("cancelled", "cancel_not_found")]
+    if cancel_changes:
+        c = cancel_changes[0]
+        if c.get("type") == "cancelled":
+            return format_cancelled(c.get("title", "Task"), language)
+        else:
+            return format_cancel_not_found(c.get("closest"), language)
+
+    # Check for clarification
+    clarifications = [c for c in task_changes if c.get("type") == "clarification"]
+    if clarifications:
+        return clarifications[0].get("question", "")
+
+    return format_created(task_changes, language, now=now)
