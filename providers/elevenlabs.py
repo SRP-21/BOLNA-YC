@@ -36,7 +36,7 @@ class ElevenLabsTTS(TTSProvider):
         cache_path = self._cache_key(text, language)
         if os.path.exists(cache_path):
             with open(cache_path, "rb") as f:
-                return TTSResult(audio_bytes=f.read(), mime_type="audio/mpeg")
+                return TTSResult(audio_bytes=f.read(), mime_type="audio/mpeg", provider="elevenlabs")
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
         headers = {
@@ -63,7 +63,7 @@ class ElevenLabsTTS(TTSProvider):
                 f.write(audio_bytes)
 
             usage.increment("elevenlabs_tts")
-            return TTSResult(audio_bytes=audio_bytes, mime_type="audio/mpeg")
+            return TTSResult(audio_bytes=audio_bytes, mime_type="audio/mpeg", provider="elevenlabs")
 
         except Exception as e:
             logger.warning(f"ElevenLabs TTS error ({e}), falling back")

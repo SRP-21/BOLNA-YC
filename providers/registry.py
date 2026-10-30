@@ -96,7 +96,7 @@ class ProviderRegistry:
                 except Exception as e2:
                     logger.warning(f"Fallback TTS failed ({e2}), falling to browser")
             from providers.base import TTSResult
-            return TTSResult(use_browser_tts=True)
+            return TTSResult(use_browser_tts=True, provider="browser")
 
     def health_status(self) -> dict:
         from providers.usage import usage

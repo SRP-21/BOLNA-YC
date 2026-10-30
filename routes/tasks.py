@@ -206,6 +206,7 @@ async def reminder_reply(
             "reply_text": reply_message,
             "task_id": task.id,
             "tts_fallback": tts_result.use_browser_tts,
+            "tts_provider_used": tts_result.provider,
         }
         if not tts_result.use_browser_tts and tts_result.audio_bytes:
             response["audio_base64"] = base64.b64encode(tts_result.audio_bytes).decode()

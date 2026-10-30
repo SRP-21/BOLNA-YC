@@ -47,6 +47,7 @@ async def voice_turn(
                 "transcript": "",
                 "reply_text": "I didn't catch that. Could you say it again?",
                 "tts_fallback": True,
+                "tts_provider_used": "browser",
                 "task_changes": [],
                 "language": detected_language,
             })
@@ -65,6 +66,7 @@ async def voice_turn(
             "task_changes": result["task_changes"],
             "language": detected_language,
             "tts_fallback": tts_result.use_browser_tts,
+            "tts_provider_used": tts_result.provider,
         }
 
         if not tts_result.use_browser_tts and tts_result.audio_bytes:
@@ -104,6 +106,7 @@ async def text_turn(
             "task_changes": result["task_changes"],
             "language": result.get("language", "en"),
             "tts_fallback": tts_result.use_browser_tts,
+            "tts_provider_used": tts_result.provider,
             "input_mode": "text",
         }
 

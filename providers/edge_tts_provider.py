@@ -26,6 +26,7 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "tts_cache")
 class EdgeTTSProvider(TTSProvider):
     def __init__(self):
         os.makedirs(CACHE_DIR, exist_ok=True)
+        self._in_failure_streak = False
 
     def _cache_key(self, text: str, language: str) -> str:
         """Hash text+language for cache lookup."""
@@ -35,13 +36,13 @@ class EdgeTTSProvider(TTSProvider):
     async def synthesize(self, text: str, language: str = "en") -> TTSResult:
         if not usage.check_limit("edge_tts"):
             logger.warning("Edge TTS limit reached, falling back to browser")
-            return TTSResult(use_browser_tts=True)
+            return TTSResult(use_browser_tts=True, provider="browser")
 
         # Check cache first
         cache_path = self._cache_key(text, language)
         if os.path.exists(cache_path):
             with open(cache_path, "rb") as f:
-                return TTSResult(audio_bytes=f.read(), mime_type="audio/mpeg")
+                return TTSResult(audio_bytes=f.read(), mime_type="audio/mpeg", provider="edge")
 
         voice = VOICE_MAP.get(language, VOICE_MAP["en"])
 
@@ -54,19 +55,25 @@ class EdgeTTSProvider(TTSProvider):
                 audio_bytes = f.read()
 
             usage.increment("edge_tts")
-            return TTSResult(audio_bytes=audio_bytes, mime_type="audio/mpeg")
+            if self._in_failure_streak:
+                logger.info("Edge TTS recovered successfully")
+                self._in_failure_streak = False
+            return TTSResult(audio_bytes=audio_bytes, mime_type="audio/mpeg", provider="edge")
 
         except Exception as e:
             # Fail soft: edge-tts is unofficial, may break anytime
-            logger.warning(f"Edge TTS failed ({e}), falling back to browser TTS")
+            # Log failure once per failure streak, not on every call
+            if not self._in_failure_streak:
+                self._in_failure_streak = True
+                logger.warning(f"Edge TTS failed ({e}), falling back to browser TTS (logging once per failure streak)")
             # Clean up partial file
             if os.path.exists(cache_path):
                 os.remove(cache_path)
-            return TTSResult(use_browser_tts=True)
+            return TTSResult(use_browser_tts=True, provider="browser")
 
 
 class BrowserTTSProvider(TTSProvider):
     """Signals the frontend to use speechSynthesis. No server-side work."""
     async def synthesize(self, text: str, language: str = "en") -> TTSResult:
-        return TTSResult(use_browser_tts=True)
+        return TTSResult(use_browser_tts=True, provider="browser")
 

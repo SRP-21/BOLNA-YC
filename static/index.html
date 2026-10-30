@@ -384,6 +384,22 @@
     }
 
     // --- Provider Health Checks ---
+    let lastUsedTTS = null;
+    function updateTTSBadge(provider, fallback) {
+      lastUsedTTS = provider || (fallback ? 'browser' : 'edge');
+      const el = document.getElementById('tts-name');
+      if (!el) return;
+      if (lastUsedTTS === 'edge') {
+        el.textContent = 'edge_tts';
+      } else if (lastUsedTTS === 'elevenlabs') {
+        el.textContent = 'ElevenLabs';
+      } else if (lastUsedTTS === 'browser' || fallback) {
+        el.textContent = 'browser voice (fallback)';
+      } else {
+        el.textContent = lastUsedTTS;
+      }
+    }
+
     async function fetchHealth() {
       try {
         const res = await fetch('/api/health');
@@ -393,7 +409,9 @@
         if (p) {
           document.getElementById('stt-name').textContent = p.stt || 'Groq Whisper';
           document.getElementById('llm-name').textContent = p.llm ? p.llm.split('/').pop() : 'gpt-oss-120b';
-          document.getElementById('tts-name').textContent = p.tts || 'Edge TTS';
+          if (!lastUsedTTS) {
+            document.getElementById('tts-name').textContent = p.tts || 'edge_tts';
+          }
         }
       } catch (e) {
         console.warn('Health check fetch failed', e);
@@ -606,6 +624,9 @@
     }
 
     async function speakAudioOrBrowser(data) {
+      if (data.tts_provider_used || data.tts_fallback !== undefined) {
+        updateTTSBadge(data.tts_provider_used, data.tts_fallback);
+      }
       if (data.audio_base64) {
         // High quality edge-tts / server audio
         const audioSrc = `data:${data.audio_mime || 'audio/mpeg'};base64,${data.audio_base64}`;
@@ -615,6 +636,7 @@
           return new Promise(r => audioPlayer.onended = r);
         } catch (e) {
           console.warn('Audio play error, falling back to browser TTS', e);
+          updateTTSBadge('browser', true);
           return speakText(data.reply_text, data.language || 'en');
         }
       } else {

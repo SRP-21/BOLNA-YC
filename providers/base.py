@@ -16,6 +16,7 @@ class TTSResult(BaseModel):
     audio_bytes: Optional[bytes] = None
     mime_type: str = "audio/mpeg"
     use_browser_tts: bool = False  # Signal frontend to use speechSynthesis
+    provider: str = "browser"
 
 
 class STTProvider(ABC):
