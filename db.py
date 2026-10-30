@@ -1,9 +1,9 @@
 """
 Database models and engine setup.
-SQLite via SQLAlchemy with 20s busy timeout for rock-solid concurrency.
+SQLite via SQLAlchemy with WAL mode, normal synchronous, and 20s busy timeout for rock-solid concurrency.
 """
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, Boolean, Text
+    create_engine, Column, Integer, String, DateTime, Boolean, Text, event
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, timezone
@@ -16,6 +16,17 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False, "timeout": 20}
 )
+
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enable WAL mode, NORMAL synchronous, and 20s busy timeout on SQLite connection."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=20000")
+    cursor.close()
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
