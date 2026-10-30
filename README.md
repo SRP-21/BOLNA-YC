@@ -16,7 +16,7 @@ A voice-first daily planner built for people who don't want to type — gig & fi
 
 ## 🛡️ 100% Free Tier Architecture
 Zero paid usage anywhere. Built with strict free-tier hygiene:
-- **LLM Planner**: Groq `openai/gpt-oss-120b` (Primary, tool calling) &rarr; Fallback `llama-3.3-70b-versatile` &rarr; Classifier `llama-3.1-8b-instant`.
+- **LLM Planner**: Groq `openai/gpt-oss-120b` (Primary, tool calling) &rarr; Fallback `openai/gpt-oss-20b` &rarr; Classifier `openai/gpt-oss-20b` (configured in `config.py`).
 - **Speech-to-Text**: Groq `whisper-large-v3-turbo` with `verbose_json` for automatic language detection (English, Hindi, Kannada, etc.).
 - **Text-to-Speech**: High-quality Indian multilingual voices via `edge-tts` (`en-IN-NeerjaNeural`, `hi-IN-SwaraNeural`, `kn-IN-SapnaNeural`), with fail-soft automatic fallback to browser `speechSynthesis`.
 - **Backend**: FastAPI + SQLite (SQLAlchemy) + APScheduler (DB-backed persistent jobs surviving restarts).
@@ -59,12 +59,13 @@ http://localhost:8000
 
 ## 🧪 How to Test It (Step-by-Step)
 
-### Test A: Run the Automated Test Suite (22 Unit & Integration Tests)
-Run pytest to verify all deterministic time-resolution, recurrence, deduplication, outcome parsing, and fallback logic:
+### Test A: Run the Automated Test Suite (30 Unit & Integration Tests)
+Install development dependencies and run pytest to verify all deterministic time-resolution, recurrence, deduplication, outcome parsing, and fallback logic:
 ```bash
+pip install -r requirements-dev.txt
 python -m pytest tests -v
 ```
-*(All 22 tests pass in < 5 seconds!)*
+*(All 30 tests pass in < 7 seconds!)*
 
 ### Test B: Audio Unlock ("Start my day")
 1. When opening the browser, notice the banner: **"Audio is locked by browser policy"**.
@@ -138,6 +139,6 @@ Microphone access in mobile browsers requires **HTTPS**:
 
 - **Microphone permission blocked**: Click the lock icon in your browser address bar &rarr; Site settings &rarr; Microphone &rarr; Allow.
 - **Audio didn't speak**: Browsers block audio before user interaction. Click the **"Start my day"** button at the top of the page.
-- **Groq Rate Limits (429)**: The system automatically falls back to `llama-3.3-70b-versatile` and logs the fallback state in the header status indicator.
+- **Groq Rate Limits (429)**: The system automatically falls back to `openai/gpt-oss-20b` (configured in `config.py`) and logs the fallback state in the header status indicator.
 - **Edge TTS fallback**: If Microsoft Edge TTS is temporarily unreachable, the frontend automatically falls back to the browser's native `speechSynthesis`.
 
