@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     default_timezone: str = "Asia/Kolkata"
     default_language: str = "en"
     reminder_retry_delay_seconds: int = 60
+    reminder_stagger_seconds: int = 10
     overdue_policy: str = "fire_now"
 
     # Usage limits

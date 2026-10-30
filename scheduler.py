@@ -191,18 +191,63 @@ def _schedule_next_recurrence(db, task: Task):
 
 def reload_pending_tasks():
     """
-    On startup: reload all pending tasks and schedule their reminders.
-    Handles overdue tasks according to config (fire_now or mark_missed).
+    On startup: reload all pending and DUE tasks and schedule their reminders.
+    Future tasks are scheduled at their normal due_at.
+    Overdue tasks and tasks in DUE status are staggered (2s, 12s, 22s...)
+    so a restart does not trigger a burst of simultaneous reminders.
     """
     db = SessionLocal()
     try:
-        pending = db.query(Task).filter(
-            Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value])
+        tasks = db.query(Task).filter(
+            Task.status.in_([
+                TaskStatus.SCHEDULED.value,
+                TaskStatus.SNOOZED.value,
+                TaskStatus.DUE.value,
+            ])
         ).all()
 
-        for task in pending:
+        now = now_ist()
+        future_tasks = []
+        overdue_or_due_tasks = []
+
+        for task in tasks:
+            task_due = ensure_ist(task.due_at)
+            if task.status == TaskStatus.DUE.value or task_due <= now:
+                overdue_or_due_tasks.append(task)
+            else:
+                future_tasks.append(task)
+
+        # Schedule future tasks directly
+        for task in future_tasks:
             schedule_task_reminder(task.id, task.due_at)
 
-        logger.info(f"Reloaded {len(pending)} pending tasks")
+        # Stagger overdue and DUE tasks if policy is fire_now
+        if settings.overdue_policy == "fire_now":
+            overdue_or_due_tasks.sort(key=lambda t: ensure_ist(t.due_at))
+            for i, task in enumerate(overdue_or_due_tasks):
+                offset = 2 + (i * settings.reminder_stagger_seconds)
+                run_date = now + timedelta(seconds=offset)
+                remove_task_job(task.id)
+                try:
+                    scheduler.add_job(
+                        fire_reminder,
+                        trigger=DateTrigger(run_date=run_date, timezone=IST),
+                        args=[task.id],
+                        id=f"task_{task.id}",
+                        replace_existing=True,
+                    )
+                    logger.info(
+                        f"⏰ Staggered overdue reminder #{task.id} at {run_date.strftime('%I:%M:%S %p')} (+{offset}s)"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to stagger job for task #{task.id}: {e}")
+        else:
+            for task in overdue_or_due_tasks:
+                logger.info(f"Task #{task.id} is overdue, marking missed per policy")
+
+        logger.info(
+            f"Reloaded {len(tasks)} pending/due tasks "
+            f"({len(future_tasks)} future, {len(overdue_or_due_tasks)} staggered overdue/due)"
+        )
     finally:
         db.close()
