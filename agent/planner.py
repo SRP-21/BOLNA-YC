@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 
 from db import SessionLocal, Task, Utterance, TaskStatus
 from agent.tools import TOOLS
-from agent.resolver import resolve_time, IST
+from agent.resolver import resolve_time
+from timeutil import IST, now_ist, to_ist_naive, ensure_ist
 from events import log_event
 from config import settings
 
@@ -80,7 +81,9 @@ async def process_turn(
     from providers.registry import registry
 
     if now is None:
-        now = datetime.now(IST)
+        now = now_ist()
+    else:
+        now = ensure_ist(now)
 
     db = SessionLocal()
     try:
@@ -183,18 +186,19 @@ def _handle_add_task(db, args: dict, now: datetime, language: str) -> dict:
     # Check for duplicates: same title within 30 minutes
     from sqlalchemy import and_
     from datetime import timedelta
+    resolved_naive = to_ist_naive(resolved.dt)
     existing = db.query(Task).filter(
         and_(
             Task.title.ilike(f"%{title}%"),
             Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value]),
-            Task.due_at.between(resolved.dt - timedelta(minutes=30),
-                                resolved.dt + timedelta(minutes=30)),
+            Task.due_at.between(resolved_naive - timedelta(minutes=30),
+                                resolved_naive + timedelta(minutes=30)),
         )
     ).first()
 
     if existing:
         logger.info(f"Duplicate detected: '{title}' near {resolved.dt}, updating existing #{existing.id}")
-        existing.due_at = resolved.dt
+        existing.due_at = resolved_naive
         existing.resolution_note = resolved.reasoning
         existing.needs_confirmation = resolved.needs_confirmation
         db.commit()
@@ -211,7 +215,7 @@ def _handle_add_task(db, args: dict, now: datetime, language: str) -> dict:
 
     task = Task(
         title=title,
-        due_at=resolved.dt,
+        due_at=resolved_naive,
         recurrence=recurrence,
         status=TaskStatus.SCHEDULED.value,
         needs_confirmation=resolved.needs_confirmation,
@@ -252,7 +256,7 @@ def _handle_update_task(db, args: dict, now: datetime) -> dict:
         task.title = args["title"]
     if args.get("time_phrase"):
         resolved = resolve_time(args["time_phrase"], now=now)
-        task.due_at = resolved.dt
+        task.due_at = to_ist_naive(resolved.dt)
         task.needs_confirmation = resolved.needs_confirmation
         task.resolution_note = resolved.reasoning
 
@@ -266,7 +270,7 @@ def _handle_update_task(db, args: dict, now: datetime) -> dict:
         "type": "updated",
         "task_id": task.id,
         "title": task.title,
-        "due_at": task.due_at.isoformat(),
+        "due_at": ensure_ist(task.due_at).isoformat() if task.due_at else None,
     }
 
 

@@ -13,6 +13,7 @@ from apscheduler.triggers.date import DateTrigger
 from db import SessionLocal, Task, TaskStatus, engine
 from events import log_event
 from config import settings
+from timeutil import IST, now_ist, ensure_ist, to_ist_naive
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ async def fire_reminder(task_id: int):
         logger.info(f"🔔 Reminder fired: #{task.id} {task.title}")
 
         # Schedule a retry if no response after configured delay
-        retry_time = datetime.now(IST) + timedelta(
+        retry_time = now_ist() + timedelta(
             seconds=settings.reminder_retry_delay_seconds
         )
         try:
@@ -94,7 +95,7 @@ async def fire_reminder_retry(task_id: int):
             )
             logger.info(f"🔔 Retry reminder: #{task.id} {task.title}")
 
-            miss_time = datetime.now(IST) + timedelta(
+            miss_time = now_ist() + timedelta(
                 seconds=settings.reminder_retry_delay_seconds
             )
             try:
@@ -134,10 +135,8 @@ def schedule_task_reminder(task_id: int, due_at: datetime):
     """Schedule (or reschedule) a reminder for a task."""
     remove_task_job(task_id)
 
-    if due_at.tzinfo is None:
-        due_at = due_at.replace(tzinfo=IST)
-
-    now = datetime.now(IST)
+    due_at = ensure_ist(due_at)
+    now = now_ist()
     if due_at <= now:
         if settings.overdue_policy == "fire_now":
             due_at = now + timedelta(seconds=2)
@@ -175,7 +174,7 @@ def _schedule_next_recurrence(db, task: Task):
     if next_dt:
         new_task = Task(
             title=task.title,
-            due_at=next_dt,
+            due_at=to_ist_naive(next_dt),
             recurrence=task.recurrence,
             status=TaskStatus.SCHEDULED.value,
             language=task.language,

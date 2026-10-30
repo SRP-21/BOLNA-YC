@@ -1,6 +1,11 @@
 """
 Database models and engine setup.
 SQLite via SQLAlchemy with WAL mode, normal synchronous, and 20s busy timeout for rock-solid concurrency.
+
+TIMEZONE CONVENTION:
+- Task.due_at is stored in SQLite as NAIVE IST (Asia/Kolkata) wall-clock time.
+- Task.created_at, Task.updated_at, Event.ts, and Utterance.ts are stored as UTC.
+- Use timeutil.now_ist(), timeutil.to_ist_naive(dt), and timeutil.ensure_ist(dt) for conversions.
 """
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Boolean, Text, event

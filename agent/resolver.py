@@ -13,12 +13,11 @@ from datetime import datetime, timedelta, timezone, time as dt_time
 from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 from config import time_windows, settings
+from timeutil import IST, now_ist, ensure_ist, to_ist_naive
 import re
 import logging
 
 logger = logging.getLogger(__name__)
-
-IST = ZoneInfo(settings.default_timezone)
 
 
 class ResolvedTime:
@@ -55,9 +54,13 @@ def resolve_time(
         ResolvedTime with the resolved datetime and metadata.
     """
     if now is None:
-        now = datetime.now(IST)
+        now = now_ist()
+    else:
+        now = ensure_ist(now)
     if reference_date is None:
         reference_date = now
+    else:
+        reference_date = ensure_ist(reference_date)
 
     phrase_lower = phrase.lower().strip()
     original_phrase = phrase
@@ -202,7 +205,10 @@ def compute_next_recurrence(
     Recurrence formats: "daily", "weekly:monday", "weekdays"
     """
     if now is None:
-        now = datetime.now(IST)
+        now = now_ist()
+    else:
+        now = ensure_ist(now)
+    task_due = ensure_ist(task_due)
 
     if recurrence == "daily":
         next_dt = task_due + timedelta(days=1)

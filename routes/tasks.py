@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 from db import SessionLocal, Task, TaskStatus
 from events import log_event
 from agent.outcome import parse_outcome
-from agent.resolver import compute_snooze, resolve_time, IST
+from agent.resolver import compute_snooze, resolve_time
+from timeutil import IST, now_ist, ensure_ist, to_ist_naive
 from scheduler import schedule_task_reminder, remove_task_job
 from providers.registry import registry
 from config import settings
@@ -62,7 +63,8 @@ async def update_task(task_id: int, title: Optional[str] = Form(None),
         if title:
             task.title = title
         if due_at:
-            task.due_at = datetime.fromisoformat(due_at)
+            parsed_dt = datetime.fromisoformat(due_at)
+            task.due_at = to_ist_naive(parsed_dt)
             schedule_task_reminder(task.id, task.due_at)
         if status:
             task.status = status
@@ -161,9 +163,9 @@ async def reminder_reply(
 
         elif outcome.outcome == "snooze":
             minutes = outcome.minutes or 10
-            new_due = compute_snooze(datetime.now(IST), minutes)
+            new_due = compute_snooze(now_ist(), minutes)
             task.status = TaskStatus.SNOOZED.value
-            task.due_at = new_due
+            task.due_at = to_ist_naive(new_due)
             task.snooze_count += 1
             schedule_task_reminder(task.id, new_due)
             reply_message = f"Snoozed {task.title} for {minutes} minutes."
@@ -172,14 +174,15 @@ async def reminder_reply(
         elif outcome.outcome == "reschedule":
             if outcome.new_time_phrase:
                 resolved = resolve_time(outcome.new_time_phrase)
-                task.due_at = resolved.dt
+                task.due_at = to_ist_naive(resolved.dt)
                 task.status = TaskStatus.SCHEDULED.value
                 schedule_task_reminder(task.id, resolved.dt)
                 reply_message = f"Moved {task.title} to {resolved.dt.strftime('%I:%M %p')}."
             else:
                 # Default: move to tomorrow same time
-                new_due = task.due_at + __import__('datetime').timedelta(days=1)
-                task.due_at = new_due
+                from datetime import timedelta
+                new_due = ensure_ist(task.due_at) + timedelta(days=1)
+                task.due_at = to_ist_naive(new_due)
                 task.status = TaskStatus.SCHEDULED.value
                 schedule_task_reminder(task.id, new_due)
                 reply_message = f"Moved {task.title} to tomorrow."

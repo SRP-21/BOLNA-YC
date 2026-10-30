@@ -22,6 +22,11 @@ Zero paid usage anywhere. Built with strict free-tier hygiene:
 - **Backend**: FastAPI + SQLite (SQLAlchemy) + APScheduler (DB-backed persistent jobs surviving restarts).
 - **Frontend**: Single static page with Tailwind CSS CDN + vanilla JS, WebAudio visualizer, and silence detection.
 
+### 🕒 Timezone Convention
+- **Task `due_at`**: Stored in SQLite as **naive IST** (`Asia/Kolkata`) wall-clock time.
+- **Audit Timestamps (`created_at`, `updated_at`, `Event.ts`, `Utterance.ts`)**: Stored in **UTC**.
+- Helper functions in `timeutil.py` (`now_ist()`, `to_ist_naive()`, `ensure_ist()`) enforce consistent handling across the resolver, routes, and scheduler.
+
 ---
 
 ## 🚀 How to Run & Test It
