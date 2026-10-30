@@ -79,6 +79,10 @@ async def process_turn(
     Process a user turn through the planner agent.
     """
     from providers.registry import registry
+    from agent.lang import detect_language
+
+    if not language or language == "en":
+        language = detect_language(user_text, fallback="en")
 
     if now is None:
         now = now_ist()
@@ -126,9 +130,15 @@ async def process_turn(
         if not reply_text:
             text_lower = user_text.lower()
             if any(w in text_lower for w in ["hello", "hi", "hey", "help", "kya kar sakte ho", "namaste"]):
-                reply_text = "Namaste! Tell me what you have planned today, and I'll set up your reminders."
+                if language == "hi":
+                    reply_text = "नमस्ते! आज की अपनी योजना बताइए, मैं आपके रिमाइंडर सेट कर दूंगा।"
+                elif language == "kn":
+                    reply_text = "ನಮಸ್ಕಾರ! ಇಂದಿನ ನಿಮ್ಮ ಯೋಜನೆಯನ್ನು ತಿಳಿಸಿ, ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸುತ್ತೇನೆ."
+                else:
+                    reply_text = "Namaste! Tell me what you have planned today, and I'll set up your reminders."
             else:
-                reply_text = "I'm listening. Tell me what tasks you'd like to schedule!"
+                from agent.replies import get_template
+                reply_text = get_template("fallback", language)
 
         # Save agent utterance
         agent_utt = Utterance(role="assistant", text=reply_text, language=language)
@@ -292,23 +302,6 @@ def _handle_cancel_task(db, args: dict) -> dict:
 
 
 def _generate_confirmation(task_changes: list, language: str) -> str:
-    """Generate a clean, spoken confirmation sentence."""
-    created = [c for c in task_changes if c.get("type") == "created"]
-    updated = [c for c in task_changes if c.get("type") in ("updated", "updated_duplicate")]
-
-    if not created and not updated:
-        return "I've noted that."
-
-    summaries = []
-    for c in created:
-        from datetime import datetime as dt
-        due = dt.fromisoformat(c["due_at"])
-        summaries.append(f"{c['title']} at {due.strftime('%I:%M %p')}")
-
-    for c in updated:
-        from datetime import datetime as dt
-        due = dt.fromisoformat(c["due_at"])
-        summaries.append(f"{c['title']} moved to {due.strftime('%I:%M %p')}")
-
-    count = len(created) + len(updated)
-    return f"Got it, {count} reminder{'s' if count > 1 else ''} set: {', '.join(summaries)}."
+    """Generate a clean, spoken confirmation sentence in the user's language."""
+    from agent.replies import format_created
+    return format_created(task_changes, language)

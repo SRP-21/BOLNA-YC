@@ -51,9 +51,11 @@ async def fire_reminder(task_id: int):
         db.commit()
 
         due_str = task.due_at.strftime('%I:%M %p') if task.due_at else "now"
+        from agent.replies import format_reminder_prompt
+        task_lang = task.language or "en"
         log_event(
             "reminder_fired",
-            f"{task.title} — it's {due_str}. Done, snooze, or move to tomorrow?",
+            format_reminder_prompt(task.title, due_str, task_lang),
             task_id=task.id
         )
         logger.info(f"🔔 Reminder fired: #{task.id} {task.title}")

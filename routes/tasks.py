@@ -110,9 +110,11 @@ async def fire_now(task_id: int):
         db.commit()
 
         due_str = task.due_at.strftime('%I:%M %p') if task.due_at else "now"
+        from agent.replies import format_reminder_prompt
+        task_lang = task.language or "en"
         log_event(
             "reminder_fired",
-            f"{task.title} — it's {due_str}. Done, snooze, or move to tomorrow?",
+            format_reminder_prompt(task.title, due_str, task_lang),
             task_id=task.id
         )
         return {"ok": True, "task_id": task.id, "title": task.title}
@@ -139,21 +141,28 @@ async def reminder_reply(
 
         # Transcribe if audio
         reply_text = text or ""
+        reply_lang = task.language or "en"
         if audio and not reply_text:
             audio_bytes = await audio.read()
             mime_type = audio.content_type or "audio/webm"
             stt_result = await registry.transcribe(audio_bytes, mime_type, language_hint)
             reply_text = stt_result.text
+            if stt_result.language:
+                reply_lang = stt_result.language
+        elif reply_text:
+            from agent.lang import detect_language
+            reply_lang = detect_language(reply_text, fallback=task.language or "en")
 
         # Parse outcome
         outcome = await parse_outcome(reply_text, task.title)
 
         # Apply outcome
+        from agent.replies import format_done, format_snoozed, format_cancelled, format_rescheduled
         reply_message = ""
         if outcome.outcome == "done":
             task.status = TaskStatus.DONE.value
             remove_task_job(task.id)
-            reply_message = f"Great, {task.title} marked as done! ✓"
+            reply_message = format_done(task.title, reply_lang)
             log_event("task_done", f"Done: {task.title}", task_id=task.id)
 
             # Handle recurrence
@@ -168,7 +177,7 @@ async def reminder_reply(
             task.due_at = to_ist_naive(new_due)
             task.snooze_count += 1
             schedule_task_reminder(task.id, new_due)
-            reply_message = f"Snoozed {task.title} for {minutes} minutes."
+            reply_message = format_snoozed(task.title, minutes, reply_lang)
             log_event("task_snoozed", f"Snoozed: {task.title} +{minutes}min", task_id=task.id)
 
         elif outcome.outcome == "reschedule":
@@ -177,7 +186,7 @@ async def reminder_reply(
                 task.due_at = to_ist_naive(resolved.dt)
                 task.status = TaskStatus.SCHEDULED.value
                 schedule_task_reminder(task.id, resolved.dt)
-                reply_message = f"Moved {task.title} to {resolved.dt.strftime('%I:%M %p')}."
+                reply_message = format_rescheduled(task.title, resolved.dt.strftime('%I:%M %p'), reply_lang)
             else:
                 # Default: move to tomorrow same time
                 from datetime import timedelta
@@ -185,26 +194,32 @@ async def reminder_reply(
                 task.due_at = to_ist_naive(new_due)
                 task.status = TaskStatus.SCHEDULED.value
                 schedule_task_reminder(task.id, new_due)
-                reply_message = f"Moved {task.title} to tomorrow."
+                reply_message = format_rescheduled(task.title, "tomorrow", reply_lang)
             log_event("task_rescheduled", reply_message, task_id=task.id)
 
         elif outcome.outcome == "cancel":
             task.status = TaskStatus.CANCELLED.value
             remove_task_job(task.id)
-            reply_message = f"Cancelled {task.title}."
+            reply_message = format_cancelled(task.title, reply_lang)
             log_event("task_cancelled", f"Cancelled: {task.title}", task_id=task.id)
 
         else:  # no_response
-            reply_message = f"I didn't catch that. Is {task.title} done?"
+            if reply_lang == "hi":
+                reply_message = f"मुझे समझ नहीं आया। क्या {task.title} पूरा हो गया?"
+            elif reply_lang == "kn":
+                reply_message = f"ನನಗೆ ಅರ್ಥವಾಗಲಿಲ್ಲ. {task.title} ಮುಗಿದಿದೆಯೇ?"
+            else:
+                reply_message = f"I didn't catch that. Is {task.title} done?"
 
         db.commit()
 
         # TTS for the reply
-        tts_result = await registry.synthesize(reply_message, task.language or "en")
+        tts_result = await registry.synthesize(reply_message, reply_lang)
         response = {
             "outcome": outcome.outcome,
             "reply_text": reply_message,
             "task_id": task.id,
+            "language": reply_lang,
             "tts_fallback": tts_result.use_browser_tts,
             "tts_provider_used": tts_result.provider,
         }

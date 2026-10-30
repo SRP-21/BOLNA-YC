@@ -53,18 +53,20 @@ async def voice_turn(
             })
 
         # Agent
-        result = await process_turn(user_text, detected_language)
+        eff_lang = detected_language or "en"
+        result = await process_turn(user_text, eff_lang)
+        final_lang = result.get("language") or eff_lang
 
         # TTS
         tts_result = await registry.synthesize(
-            result["reply_text"], detected_language
+            result["reply_text"], final_lang
         )
 
         response = {
             "transcript": user_text,
             "reply_text": result["reply_text"],
             "task_changes": result["task_changes"],
-            "language": detected_language,
+            "language": final_lang,
             "tts_fallback": tts_result.use_browser_tts,
             "tts_provider_used": tts_result.provider,
         }
@@ -86,25 +88,28 @@ async def voice_turn(
 @router.post("/api/text/turn")
 async def text_turn(
     text: str = Form(...),
-    language: Optional[str] = Form("en"),
+    language: Optional[str] = Form(None),
 ):
     """
     Text input fallback — goes through the exact same pipeline.
     Same agent, same resolver, same everything.
     """
     try:
-        result = await process_turn(text, language or "en")
+        from agent.lang import detect_language
+        eff_lang = language if (language and language != "en") else detect_language(text, fallback="en")
+        result = await process_turn(text, eff_lang)
+        final_lang = result.get("language") or eff_lang
 
         # TTS for the reply
         tts_result = await registry.synthesize(
-            result["reply_text"], result.get("language", "en")
+            result["reply_text"], final_lang
         )
 
         response = {
             "transcript": text,
             "reply_text": result["reply_text"],
             "task_changes": result["task_changes"],
-            "language": result.get("language", "en"),
+            "language": final_lang,
             "tts_fallback": tts_result.use_browser_tts,
             "tts_provider_used": tts_result.provider,
             "input_mode": "text",
