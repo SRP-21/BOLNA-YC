@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bolna Planner — A planner you talk to, that talks back</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          },
+          animation: {
+            'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'ripple': 'ripple 1.5s linear infinite',
+            'spin-slow': 'spin 4s linear infinite',
+          },
+          keyframes: {
+            ripple: {
+              '0%': { transform: 'scale(0.95)', opacity: '0.8' },
+              '100%': { transform: 'scale(1.4)', opacity: '0' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 3px; }
+    .waveform-bar {
+      transition: height 0.08s ease-in-out;
+    }
+    .orb-glow {
+      filter: blur(20px);
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans transition-colors duration-200">
+  <div class="min-h-full flex flex-col">
+    <!-- Top Navigation / Header -->
+    <header class="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
+            <i class="fa-solid fa-microphone-lines text-lg"></i>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-indigo-600 to-violet-500 bg-clip-text text-transparent">Bolna Planner</span>
+              <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 font-medium">Voice AI</span>
+            </div>
+            <p class="text-xs text-slate-500 dark:text-slate-400">A planner you talk to, that talks back</p>
+          </div>
+        </div>
+
+        <!-- Health / Provider Status Badges -->
+        <div class="hidden md:flex items-center space-x-3 text-xs">
+          <div id="provider-badge-stt" class="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center space-x-1.5" title="Speech to Text Provider">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="text-slate-500 dark:text-slate-400">STT:</span>
+            <span id="stt-name" class="font-medium text-slate-700 dark:text-slate-200">Groq Whisper</span>
+          </div>
+          <div id="provider-badge-llm" class="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center space-x-1.5" title="LLM Planner Provider">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="text-slate-500 dark:text-slate-400">LLM:</span>
+            <span id="llm-name" class="font-medium text-slate-700 dark:text-slate-200">gpt-oss-120b</span>
+          </div>
+          <div id="provider-badge-tts" class="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center space-x-1.5" title="Text to Speech Provider">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="text-slate-500 dark:text-slate-400">TTS:</span>
+            <span id="tts-name" class="font-medium text-slate-700 dark:text-slate-200">Edge TTS</span>
+          </div>
+          <span id="detected-lang-pill" class="hidden px-2.5 py-1 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50 font-medium">
+            <i class="fa-solid fa-language mr-1"></i><span id="detected-lang-name">English</span>
+          </span>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <!-- Dark Mode Toggle -->
+          <button id="theme-toggle" class="p-2 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+            <i class="fa-solid fa-moon dark:hidden"></i>
+            <i class="fa-solid fa-sun hidden dark:inline"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Autoplay & Audio Unlock Banner -->
+    <div id="unlock-banner" class="bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2.5 shadow-md flex items-center justify-between">
+      <div class="max-w-7xl mx-auto w-full flex items-center justify-between text-sm">
+        <div class="flex items-center space-x-2">
+          <i class="fa-solid fa-volume-high text-amber-100 text-base animate-bounce"></i>
+          <span class="font-medium">Audio is locked by browser policy. Click "Start my day" to enable spoken reminders and voice interactions!</span>
+        </div>
+        <button id="unlock-btn" class="ml-4 px-4 py-1.5 bg-white text-orange-600 font-semibold rounded-lg shadow-sm hover:bg-orange-50 transition transform active:scale-95 text-xs whitespace-nowrap">
+          <i class="fa-solid fa-play mr-1.5"></i>Start my day
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Reminder Toast / Modal -->
+    <div id="active-reminder-modal" class="hidden fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-slate-900 border-2 border-indigo-500 rounded-2xl p-6 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200">
+        <div class="flex items-start justify-between">
+          <div class="flex items-center space-x-3">
+            <span class="p-3 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-xl text-xl animate-bounce">
+              <i class="fa-solid fa-bell"></i>
+            </span>
+            <div>
+              <span class="text-xs uppercase tracking-wider font-bold text-indigo-600 dark:text-indigo-400">Reminder Due Now</span>
+              <h3 id="modal-task-title" class="text-xl font-bold text-slate-900 dark:text-white leading-tight">Standup meeting</h3>
+            </div>
+          </div>
+        </div>
+        <p id="modal-task-speech" class="mt-4 text-slate-600 dark:text-slate-300 text-sm italic bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
+          "It's 10:00 AM, time for standup meeting. Done, snooze, or move to tomorrow?"
+        </p>
+
+        <!-- Listening visualizer inside reminder modal -->
+        <div id="modal-mic-state" class="mt-4 p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="w-3 h-3 rounded-full bg-red-500 animate-ping"></span>
+            <span id="modal-status-text" class="text-xs font-medium text-indigo-700 dark:text-indigo-300">Listening for your reply ("Done", "Snooze 10m", "Kal")...</span>
+          </div>
+          <button id="modal-mic-toggle" class="p-2 rounded-full bg-indigo-600 text-white text-xs hover:bg-indigo-700 transition">
+            <i class="fa-solid fa-microphone"></i>
+          </button>
+        </div>
+
+        <div class="mt-5 grid grid-cols-4 gap-2">
+          <button onclick="handleReminderQuickReply('done')" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow transition flex flex-col items-center">
+            <i class="fa-solid fa-check mb-1"></i> Done
+          </button>
+          <button onclick="handleReminderQuickReply('snooze')" class="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow transition flex flex-col items-center">
+            <i class="fa-solid fa-clock mb-1"></i> Snooze 10m
+          </button>
+          <button onclick="handleReminderQuickReply('tomorrow')" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow transition flex flex-col items-center">
+            <i class="fa-solid fa-calendar-plus mb-1"></i> Tomorrow
+          </button>
+          <button onclick="handleReminderQuickReply('cancel')" class="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold shadow transition flex flex-col items-center">
+            <i class="fa-solid fa-xmark mb-1"></i> Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Left Column: Voice Hero & Live Conversation (7 cols) -->
+      <div class="lg:col-span-7 flex flex-col space-y-6">
+        
+        <!-- Hero Voice Section -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col items-center text-center relative overflow-hidden">
+          
+          <!-- Background Glow Effect -->
+          <div id="orb-ambient" class="absolute w-64 h-64 rounded-full bg-indigo-500/10 dark:bg-indigo-500/15 orb-glow pointer-events-none transition-all duration-700 -z-0"></div>
+
+          <div class="relative z-10 w-full max-w-md flex flex-col items-center">
+            <span class="text-xs uppercase tracking-widest font-bold text-indigo-600 dark:text-indigo-400 mb-2">Speak in English, Hindi, Kannada, or Hinglish</span>
+            <h2 id="agent-state-title" class="text-xl sm:text-2xl font-bold text-slate-800 dark:text-white">Ready when you are</h2>
+            <p id="agent-state-desc" class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 mb-6">Tap the mic and speak your day. e.g. "standup at 10, send invoice before lunch, gym around 6"</p>
+
+            <!-- Hero Mic Button & Animation -->
+            <div class="relative my-4 flex items-center justify-center">
+              <!-- Ripple ring (active during listening) -->
+              <div id="mic-ripple" class="hidden absolute inset-0 rounded-full bg-indigo-500/30 dark:bg-indigo-400/20 animate-ripple"></div>
+              
+              <!-- Thinking spinner ring -->
+              <div id="mic-spinner" class="hidden absolute -inset-2.5 rounded-full border-4 border-transparent border-t-indigo-600 border-r-violet-500 animate-spin"></div>
+
+              <!-- Main Mic Button -->
+              <button id="hero-mic-btn" class="relative z-10 w-24 h-24 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-xl shadow-indigo-500/30 flex flex-col items-center justify-center transition-all transform active:scale-90 focus:outline-none focus:ring-4 focus:ring-indigo-500/30">
+                <i id="hero-mic-icon" class="fa-solid fa-microphone text-3xl"></i>
+                <span id="hero-mic-label" class="text-[10px] uppercase font-bold tracking-wider mt-1 opacity-90">Tap to Talk</span>
+              </button>
+            </div>
+
+            <!-- Waveform Canvas for Silence & Audio Feedback -->
+            <div id="waveform-container" class="w-full h-8 flex items-center justify-center space-x-1 mt-3 px-4">
+              <div class="waveform-bar w-1 bg-indigo-300 dark:bg-indigo-700 rounded-full h-2"></div>
+              <div class="waveform-bar w-1 bg-indigo-400 dark:bg-indigo-600 rounded-full h-3"></div>
+              <div class="waveform-bar w-1 bg-indigo-500 dark:bg-indigo-500 rounded-full h-4"></div>
+              <div class="waveform-bar w-1 bg-indigo-600 dark:bg-indigo-400 rounded-full h-5"></div>
+              <div class="waveform-bar w-1 bg-indigo-500 dark:bg-indigo-500 rounded-full h-4"></div>
+              <div class="waveform-bar w-1 bg-indigo-400 dark:bg-indigo-600 rounded-full h-3"></div>
+              <div class="waveform-bar w-1 bg-indigo-300 dark:bg-indigo-700 rounded-full h-2"></div>
+            </div>
+
+            <!-- Silence Detection Indicator -->
+            <div id="silence-indicator" class="hidden text-[11px] text-slate-400 dark:text-slate-500 mt-2 flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Silence detection active (will auto-stop when you pause)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Conversation Transcript -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col flex-1 min-h-[380px]">
+          <div class="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div class="flex items-center space-x-2">
+              <i class="fa-solid fa-comments text-indigo-500"></i>
+              <h3 class="font-bold text-slate-800 dark:text-slate-200 text-sm">Conversation Transcript</h3>
+            </div>
+            <button id="clear-transcript-btn" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+              Clear
+            </button>
+          </div>
+
+          <!-- Messages Scroll View -->
+          <div id="transcript-container" class="flex-1 overflow-y-auto py-4 space-y-4 max-h-[320px]">
+            <!-- Welcome Agent Message -->
+            <div class="flex items-start space-x-3">
+              <div class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-xs shrink-0 font-bold">
+                BP
+              </div>
+              <div class="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] shadow-sm">
+                Namaste! I am your voice planner. Tap the mic and tell me what you have planned today in English, Hindi, Kannada, or Hinglish.
+              </div>
+            </div>
+          </div>
+
+          <!-- Text Input Fallback (Clearly Labeled as requested) -->
+          <form id="text-fallback-form" class="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center space-x-2">
+            <div class="relative flex-1">
+              <input type="text" id="text-input" placeholder="Type instead if mic fails (runs exact same pipeline)..." class="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-900 dark:text-white placeholder-slate-400">
+              <span class="absolute right-3 top-2.5 text-[10px] text-slate-400 font-medium">Text Fallback</span>
+            </div>
+            <button type="submit" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">
+              <i class="fa-solid fa-paper-plane"></i>
+            </button>
+          </form>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Tasks Dashboard & Live Activity Feed (5 cols) -->
+      <div class="lg:col-span-5 flex flex-col space-y-6">
+        
+        <!-- Tasks List Card -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col">
+          <div class="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div class="flex items-center space-x-2">
+              <i class="fa-solid fa-list-check text-indigo-500"></i>
+              <h3 class="font-bold text-slate-800 dark:text-slate-200 text-sm">Scheduled Reminders</h3>
+              <span id="tasks-count" class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-300">0</span>
+            </div>
+            <button id="refresh-tasks-btn" class="p-1.5 text-slate-400 hover:text-indigo-600 transition" title="Refresh Tasks">
+              <i class="fa-solid fa-arrows-rotate text-xs"></i>
+            </button>
+          </div>
+
+          <!-- Tasks Scroll List -->
+          <div id="tasks-container" class="mt-4 space-y-3 max-h-[380px] overflow-y-auto pr-1">
+            <div id="tasks-empty-state" class="text-center py-10 text-slate-400 dark:text-slate-500">
+              <i class="fa-solid fa-calendar-check text-3xl mb-2 opacity-50"></i>
+              <p class="text-xs">No reminders scheduled yet.<br>Speak to add your tasks!</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Activity Feed Card -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col flex-1">
+          <div class="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div class="flex items-center space-x-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <h3 class="font-bold text-slate-800 dark:text-slate-200 text-sm">Live Activity Feed</h3>
+            </div>
+            <span class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">SSE Connected</span>
+          </div>
+
+          <div id="events-container" class="mt-4 space-y-2.5 max-h-[260px] overflow-y-auto pr-1 text-xs">
+            <!-- Events injected dynamically -->
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-3 text-center text-xs text-slate-400">
+      Bolna x Y Combinator Buildathon &bull; Real voice loop &bull; Zero canned data &bull; 100% Free Tiers
+    </footer>
+  </div>
+
+  <!-- Audio Player element for spoken responses -->
+  <audio id="audio-player" class="hidden"></audio>
+
+  <!-- Application Logic (Vanilla JS) -->
+  <script>
+    // --- Global State ---
+    let isUnlocked = false;
+    let audioContext = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let silenceTimer = null;
+    let analyserNode = null;
+    let animFrameId = null;
+    let activeReminderTaskId = null;
+    let activeReminderAudio = null;
+
+    // --- DOM Elements ---
+    const heroMicBtn = document.getElementById('hero-mic-btn');
+    const heroMicIcon = document.getElementById('hero-mic-icon');
+    const heroMicLabel = document.getElementById('hero-mic-label');
+    const micRipple = document.getElementById('mic-ripple');
+    const micSpinner = document.getElementById('mic-spinner');
+    const agentStateTitle = document.getElementById('agent-state-title');
+    const agentStateDesc = document.getElementById('agent-state-desc');
+    const silenceIndicator = document.getElementById('silence-indicator');
+    const waveformContainer = document.getElementById('waveform-container');
+    const waveformBars = document.querySelectorAll('.waveform-bar');
+    const transcriptContainer = document.getElementById('transcript-container');
+    const textFallbackForm = document.getElementById('text-fallback-form');
+    const textInput = document.getElementById('text-input');
+    const tasksContainer = document.getElementById('tasks-container');
+    const tasksCount = document.getElementById('tasks-count');
+    const tasksEmptyState = document.getElementById('tasks-empty-state');
+    const eventsContainer = document.getElementById('events-container');
+    const unlockBanner = document.getElementById('unlock-banner');
+    const unlockBtn = document.getElementById('unlock-btn');
+    const activeReminderModal = document.getElementById('active-reminder-modal');
+    const modalTaskTitle = document.getElementById('modal-task-title');
+    const modalTaskSpeech = document.getElementById('modal-task-speech');
+    const modalStatusText = document.getElementById('modal-status-text');
+    const audioPlayer = document.getElementById('audio-player');
+    const themeToggle = document.getElementById('theme-toggle');
+
+    // --- Theme Setup ---
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    themeToggle.addEventListener('click', () => {
+      document.documentElement.classList.toggle('dark');
+      localStorage.theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+    });
+
+    // --- Audio Unlock Policy ---
+    unlockBtn.addEventListener('click', unlockAudio);
+    async function unlockAudio() {
+      try {
+        if (!audioContext) {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+        // Play silent sound to prime browser audio
+        const silentBuffer = audioContext.createBuffer(1, 1, 22050);
+        const source = audioContext.createBufferSource();
+        source.buffer = silentBuffer;
+        source.connect(audioContext.destination);
+        source.start(0);
+
+        // Request Notification permission if supported
+        if ('Notification' in window && Notification.permission === 'default') {
+          await Notification.requestPermission();
+        }
+
+        isUnlocked = true;
+        unlockBanner.classList.add('hidden');
+        appendEventLog('audio_unlocked', 'Audio system unlocked. Reminders ready to speak aloud.');
+      } catch (err) {
+        console.error('Audio unlock error:', err);
+      }
+    }
+
+    // --- Provider Health Checks ---
+    async function fetchHealth() {
+      try {
+        const res = await fetch('/api/health');
+        if (!res.ok) return;
+        const data = await res.json();
+        const p = data.providers;
+        if (p) {
+          document.getElementById('stt-name').textContent = p.stt || 'Groq Whisper';
+          document.getElementById('llm-name').textContent = p.llm ? p.llm.split('/').pop() : 'gpt-oss-120b';
+          document.getElementById('tts-name').textContent = p.tts || 'Edge TTS';
+        }
+      } catch (e) {
+        console.warn('Health check fetch failed', e);
+      }
+    }
+    fetchHealth();
+    setInterval(fetchHealth, 30000);
+
+    // --- Task List Management ---
+    async function fetchTasks() {
+      try {
+        const res = await fetch('/api/tasks');
+        if (!res.ok) return;
+        const tasks = await res.json();
+        renderTasks(tasks);
+      } catch (e) {
+        console.error('Failed to fetch tasks', e);
+      }
+    }
+
+    function renderTasks(tasks) {
+      tasksCount.textContent = tasks.length;
+      if (tasks.length === 0) {
+        tasksContainer.innerHTML = '';
+        tasksContainer.appendChild(tasksEmptyState);
+        return;
+      }
+
+      tasksContainer.innerHTML = '';
+      tasks.forEach(task => {
+        const div = document.createElement('div');
+        div.className = `p-3.5 rounded-2xl border transition ${
+          task.status === 'due' ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700' :
+          task.status === 'done' ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-60' :
+          task.status === 'snoozed' ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800' :
+          'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+        }`;
+
+        const dueFormatted = task.due_at ? new Date(task.due_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unset';
+        
+        div.innerHTML = `
+          <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0 pr-2">
+              <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                <span class="font-semibold text-sm text-slate-800 dark:text-slate-100 ${task.status === 'done' ? 'line-through' : ''}">${escapeHtml(task.title)}</span>
+                ${task.needs_confirmation ? `
+                  <span class="cursor-pointer group relative inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700" title="${escapeHtml(task.resolution_note || 'Ambiguous time')}">
+                    <i class="fa-solid fa-triangle-exclamation mr-1 text-[9px]"></i>Needs confirmation
+                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-1 z-20 w-48 p-2 bg-slate-900 text-white text-[10px] rounded-lg shadow-lg">
+                      ${escapeHtml(task.resolution_note || 'Resolved from vague phrase')}
+                    </div>
+                  </span>
+                ` : ''}
+                ${task.recurrence ? `
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">
+                    <i class="fa-solid fa-repeat mr-1 text-[8px]"></i>${escapeHtml(task.recurrence)}
+                  </span>
+                ` : ''}
+              </div>
+              <div class="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                <span><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${dueFormatted}</span>
+                <span class="capitalize text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                  task.status === 'due' ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 animate-pulse' :
+                  task.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' :
+                  task.status === 'snoozed' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300' :
+                  'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                }">${task.status}</span>
+                ${task.snooze_count > 0 ? `<span class="text-[10px] text-amber-600 dark:text-amber-400">(${task.snooze_count}x snoozed)</span>` : ''}
+              </div>
+            </div>
+            <div class="flex items-center space-x-1 shrink-0">
+              <button onclick="fireReminderNow(${task.id})" class="px-2 py-1 text-[11px] bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/40 dark:hover:bg-indigo-800/60 text-indigo-700 dark:text-indigo-300 rounded font-medium transition" title="Trigger reminder immediately for stage demo">
+                <i class="fa-solid fa-play text-[10px] mr-1"></i>Fire now
+              </button>
+              <button onclick="deleteTask(${task.id})" class="p-1.5 text-slate-400 hover:text-rose-600 transition" title="Cancel reminder">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+            </div>
+          </div>
+        `;
+        tasksContainer.appendChild(div);
+      });
+    }
+
+    async function deleteTask(id) {
+      if (!confirm('Cancel this reminder?')) return;
+      try {
+        await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+        fetchTasks();
+      } catch (e) {
+        console.error('Delete task failed', e);
+      }
+    }
+
+    async function fireReminderNow(id) {
+      try {
+        await fetch(`/api/tasks/${id}/fire-now`, { method: 'POST' });
+        fetchTasks();
+      } catch (e) {
+        console.error('Fire now failed', e);
+      }
+    }
+
+    // --- Live SSE Stream ---
+    function initEventSource() {
+      const es = new EventSource('/api/events/stream');
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          appendEventLog(data.type, data.message);
+          
+          // If a reminder fired, trigger the spoken reminder flow!
+          if (data.type === 'reminder_fired' || data.type === 'reminder_retry') {
+            handleFiredReminder(data.task_id, data.message);
+          }
+          fetchTasks();
+        } catch (e) {
+          console.error('Error parsing SSE event', e);
+        }
+      };
+      es.onerror = () => {
+        es.close();
+        setTimeout(initEventSource, 3000);
+      };
+    }
+    initEventSource();
+
+    function appendEventLog(type, message) {
+      const item = document.createElement('div');
+      item.className = 'flex items-start space-x-2 py-1 border-b border-slate-100 dark:border-slate-800/60';
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      item.innerHTML = `
+        <span class="text-[10px] text-slate-400 font-mono shrink-0">${time}</span>
+        <span class="text-slate-600 dark:text-slate-300 break-words flex-1">${escapeHtml(message)}</span>
+      `;
+      eventsContainer.insertBefore(item, eventsContainer.firstChild);
+    }
+
+    // --- Spoken Reminders & Voice Reply Loop ---
+    async function handleFiredReminder(taskId, textToSpeak) {
+      activeReminderTaskId = taskId;
+      modalTaskSpeech.textContent = `"${textToSpeak}"`;
+      activeReminderModal.classList.remove('hidden');
+
+      // Fetch task details for title
+      try {
+        const res = await fetch('/api/tasks');
+        const tasks = await res.json();
+        const t = tasks.find(x => x.id === taskId);
+        if (t) modalTaskTitle.textContent = t.title;
+      } catch (e) {}
+
+      // Secondary alert: Notification API
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Bolna Reminder Due!', {
+          body: textToSpeak,
+          icon: '/static/favicon.ico'
+        });
+      }
+
+      // Speak aloud!
+      setAgentState('speaking', 'Speaking reminder...', textToSpeak);
+      await speakText(textToSpeak);
+
+      // Once done speaking, automatically start listening for reply!
+      modalStatusText.textContent = 'Listening for your reply ("Done", "Snooze 10m", "Kal")...';
+      startRecording(true); // true = isReminderReply
+    }
+
+    async function handleReminderQuickReply(action) {
+      if (!activeReminderTaskId) return;
+      const formData = new FormData();
+      if (action === 'done') formData.append('text', 'done');
+      else if (action === 'snooze') formData.append('text', 'snooze 10 minutes');
+      else if (action === 'tomorrow') formData.append('text', 'move to tomorrow');
+      else if (action === 'cancel') formData.append('text', 'cancel');
+
+      try {
+        const res = await fetch(`/api/reminders/${activeReminderTaskId}/reply`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        activeReminderModal.classList.add('hidden');
+        if (data.reply_text) {
+          appendBubble('agent', data.reply_text);
+          await speakAudioOrBrowser(data);
+        }
+        fetchTasks();
+      } catch (e) {
+        console.error('Quick reply error', e);
+      }
+    }
+
+    // --- Speech Synthesis Helper ---
+    async function speakText(text, lang = 'en') {
+      return new Promise((resolve) => {
+        if (!('speechSynthesis' in window)) {
+          resolve();
+          return;
+        }
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = lang === 'hi' ? 'hi-IN' : lang === 'kn' ? 'kn-IN' : 'en-IN';
+        utterance.rate = 1.0;
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+        window.speechSynthesis.speak(utterance);
+      });
+    }
+
+    async function speakAudioOrBrowser(data) {
+      if (data.audio_base64) {
+        // High quality edge-tts / server audio
+        const audioSrc = `data:${data.audio_mime || 'audio/mpeg'};base64,${data.audio_base64}`;
+        audioPlayer.src = audioSrc;
+        try {
+          await audioPlayer.play();
+          return new Promise(r => audioPlayer.onended = r);
+        } catch (e) {
+          console.warn('Audio play error, falling back to browser TTS', e);
+          return speakText(data.reply_text, data.language || 'en');
+        }
+      } else {
+        // Browser speechSynthesis fallback
+        return speakText(data.reply_text, data.language || 'en');
+      }
+    }
+
+    // --- MediaRecorder & Silence Detection ---
+    heroMicBtn.addEventListener('click', () => {
+      if (!isUnlocked) unlockAudio();
+      if (isRecording) {
+        stopRecording();
+      } else {
+        startRecording(false);
+      }
+    });
+
+    async function startRecording(forReminder = false) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        isRecording = true;
+        audioChunks = [];
+
+        // Audio Context & Analyser for visualizer & silence detection
+        if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioContext.state === 'suspended') await audioContext.resume();
+
+        const source = audioContext.createMediaStreamSource(stream);
+        analyserNode = audioContext.createAnalyser();
+        analyserNode.fftSize = 64;
+        source.connect(analyserNode);
+
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          cancelAnimationFrame(animFrameId);
+          resetWaveform();
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          if (audioBlob.size > 1000) {
+            if (forReminder && activeReminderTaskId) {
+              await sendReminderVoiceReply(audioBlob);
+            } else {
+              await sendVoiceTurn(audioBlob);
+            }
+          }
+        };
+
+        mediaRecorder.start(250);
+        setAgentState('listening', 'Listening...', 'Speak now. Pausing will automatically finish.');
+        startVisualizerAndSilenceDetection();
+      } catch (err) {
+        console.error('Microphone error:', err);
+        setAgentState('idle', 'Microphone Error', 'Check permissions or use text fallback below.');
+        alert('Could not access microphone. Please check browser microphone permissions.');
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      isRecording = false;
+      if (silenceTimer) clearTimeout(silenceTimer);
+    }
+
+    function startVisualizerAndSilenceDetection() {
+      const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+      let silenceStart = null;
+      const SILENCE_THRESHOLD = 15; // Noise floor threshold
+      const SILENCE_DURATION_MS = 1800; // 1.8s silence triggers auto-stop
+
+      silenceIndicator.classList.remove('hidden');
+
+      function checkAudio() {
+        if (!isRecording) return;
+        analyserNode.getByteFrequencyData(dataArray);
+
+        // Calculate average volume
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length;
+
+        // Animate waveform bars
+        waveformBars.forEach((bar, index) => {
+          const val = dataArray[index % dataArray.length] || 10;
+          const height = Math.max(4, Math.min(28, (val / 255) * 32));
+          bar.style.height = `${height}px`;
+        });
+
+        // Silence detection
+        if (avg < SILENCE_THRESHOLD) {
+          if (!silenceStart) {
+            silenceStart = Date.now();
+          } else if (Date.now() - silenceStart > SILENCE_DURATION_MS) {
+            // Auto stop!
+            stopRecording();
+            return;
+          }
+        } else {
+          silenceStart = null;
+        }
+
+        animFrameId = requestAnimationFrame(checkAudio);
+      }
+      animFrameId = requestAnimationFrame(checkAudio);
+    }
+
+    function resetWaveform() {
+      silenceIndicator.classList.add('hidden');
+      waveformBars.forEach((bar, i) => {
+        bar.style.height = `${(i % 3 + 2) * 4}px`;
+      });
+    }
+
+    // --- Voice Turn API Call ---
+    async function sendVoiceTurn(audioBlob) {
+      setAgentState('thinking', 'Thinking...', 'Analyzing your speech with Groq Whisper & LLM...');
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'turn.webm');
+
+      try {
+        const res = await fetch('/api/voice/turn', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+
+        if (data.transcript) {
+          appendBubble('user', data.transcript, data.language);
+          updateLanguageBadge(data.language);
+        }
+
+        if (data.reply_text) {
+          appendBubble('agent', data.reply_text);
+          setAgentState('speaking', 'Speaking...', data.reply_text);
+          await speakAudioOrBrowser(data);
+        }
+
+        fetchTasks();
+        setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+      } catch (err) {
+        console.error('Voice turn error:', err);
+        setAgentState('idle', 'Error processing audio', 'Please try again or use text fallback.');
+      }
+    }
+
+    async function sendReminderVoiceReply(audioBlob) {
+      setAgentState('thinking', 'Thinking...', 'Interpreting reminder reply...');
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'reply.webm');
+
+      try {
+        const res = await fetch(`/api/reminders/${activeReminderTaskId}/reply`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        activeReminderModal.classList.add('hidden');
+        if (data.reply_text) {
+          appendBubble('agent', data.reply_text);
+          await speakAudioOrBrowser(data);
+        }
+        fetchTasks();
+        setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+      } catch (err) {
+        console.error('Reminder reply error:', err);
+        setAgentState('idle', 'Error processing reply', 'Tap reply buttons instead.');
+      }
+    }
+
+    // --- Text Turn Fallback ---
+    textFallbackForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = textInput.value.trim();
+      if (!text) return;
+      textInput.value = '';
+
+      appendBubble('user', text, null, true);
+      setAgentState('thinking', 'Processing text input...', 'Running planner with Groq LLM...');
+
+      const formData = new FormData();
+      formData.append('text', text);
+
+      try {
+        const res = await fetch('/api/text/turn', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+
+        if (data.reply_text) {
+          appendBubble('agent', data.reply_text);
+          setAgentState('speaking', 'Speaking...', data.reply_text);
+          await speakAudioOrBrowser(data);
+        }
+
+        fetchTasks();
+        setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+      } catch (err) {
+        console.error('Text turn error:', err);
+        setAgentState('idle', 'Error processing text', 'Please try again.');
+      }
+    });
+
+    // --- UI State Helpers ---
+    function setAgentState(state, title, desc) {
+      agentStateTitle.textContent = title;
+      agentStateDesc.textContent = desc;
+
+      if (state === 'listening') {
+        heroMicBtn.className = 'relative z-10 w-24 h-24 rounded-full bg-red-600 hover:bg-red-500 text-white shadow-xl shadow-red-500/30 flex flex-col items-center justify-center transition-all transform scale-105';
+        heroMicIcon.className = 'fa-solid fa-stop text-3xl animate-pulse';
+        heroMicLabel.textContent = 'Listening';
+        micRipple.classList.remove('hidden');
+        micSpinner.classList.add('hidden');
+      } else if (state === 'thinking') {
+        heroMicBtn.className = 'relative z-10 w-24 h-24 rounded-full bg-violet-600 text-white shadow-xl flex flex-col items-center justify-center';
+        heroMicIcon.className = 'fa-solid fa-brain text-3xl';
+        heroMicLabel.textContent = 'Thinking';
+        micRipple.classList.add('hidden');
+        micSpinner.classList.remove('hidden');
+      } else if (state === 'speaking') {
+        heroMicBtn.className = 'relative z-10 w-24 h-24 rounded-full bg-emerald-600 text-white shadow-xl shadow-emerald-500/30 flex flex-col items-center justify-center';
+        heroMicIcon.className = 'fa-solid fa-volume-high text-3xl animate-pulse';
+        heroMicLabel.textContent = 'Speaking';
+        micRipple.classList.remove('hidden');
+        micSpinner.classList.add('hidden');
+      } else {
+        // Idle
+        heroMicBtn.className = 'relative z-10 w-24 h-24 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-xl shadow-indigo-500/30 flex flex-col items-center justify-center transition-all transform active:scale-90';
+        heroMicIcon.className = 'fa-solid fa-microphone text-3xl';
+        heroMicLabel.textContent = 'Tap to Talk';
+        micRipple.classList.add('hidden');
+        micSpinner.classList.add('hidden');
+      }
+    }
+
+    function appendBubble(role, text, lang = null, isTextMode = false) {
+      const div = document.createElement('div');
+      div.className = `flex items-start space-x-3 ${role === 'user' ? 'justify-end' : ''}`;
+
+      if (role === 'user') {
+        div.innerHTML = `
+          <div class="bg-indigo-600 text-white text-sm px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] shadow-sm">
+            <div class="flex items-center space-x-1.5 justify-end mb-1 text-[10px] text-indigo-200">
+              ${isTextMode ? '<span class="bg-indigo-700/60 px-1.5 py-0.5 rounded">Typed</span>' : '<span class="bg-indigo-700/60 px-1.5 py-0.5 rounded"><i class="fa-solid fa-microphone mr-1"></i>Voice</span>'}
+              ${lang ? `<span class="uppercase font-bold">${escapeHtml(lang)}</span>` : ''}
+            </div>
+            ${escapeHtml(text)}
+          </div>
+          <div class="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 text-xs shrink-0 font-bold">
+            U
+          </div>
+        `;
+      } else {
+        div.innerHTML = `
+          <div class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-xs shrink-0 font-bold">
+            BP
+          </div>
+          <div class="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] shadow-sm">
+            ${escapeHtml(text)}
+          </div>
+        `;
+      }
+
+      transcriptContainer.appendChild(div);
+      transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+    }
+
+    function updateLanguageBadge(lang) {
+      if (!lang) return;
+      const pill = document.getElementById('detected-lang-pill');
+      const name = document.getElementById('detected-lang-name');
+      const langNames = { en: 'English', hi: 'Hindi', kn: 'Kannada', 'hi-en': 'Hinglish' };
+      name.textContent = langNames[lang] || lang.toUpperCase();
+      pill.classList.remove('hidden');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>"']/g, function(m) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+      });
+    }
+
+    // Refresh tasks button
+    document.getElementById('refresh-tasks-btn').addEventListener('click', fetchTasks);
+    document.getElementById('clear-transcript-btn').addEventListener('click', () => {
+      transcriptContainer.innerHTML = '';
+    });
+
+    // Initial load
+    fetchTasks();
+  </script>
+</body>
+</html>
+
