@@ -4,3 +4,7 @@ __pycache__/
 .pytest_cache/
 venv/
 planner.db*
+*.bak
+*.wav
+test_step5.py
+t.mp3
