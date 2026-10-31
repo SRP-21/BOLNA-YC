@@ -72,22 +72,57 @@ def _get_recent_turns(db, limit: int = 4) -> list[dict]:
     return turns
 
 
+DESTRUCTIVE_COMMAND_WORDS = [
+    # English
+    "cancel", "remove", "delete", "drop", "clear", "discard",
+    # Hindi / Hinglish Latin
+    "hata do", "hatao", "hata de", "hata dena", "cancel karo", "cancel kar do",
+    "radd karo", "radd kar do", "delete karo", "delete kar do", "nikal do", "nikalo",
+    # Hindi Devanagari
+    "हटा दो", "हटाओ", "हटा देना", "रद्द करो", "रद्द कर दो", "कैंसिल करो", "कैंसिल कर दो", "डिलीट करो", "निकाल दो",
+    # Kannada Latin
+    "raddu madi", "raddu madu", "cancel madi", "cancel madu", "tegeduhaku", "tegedu haku", "tegedu haki",
+    # Kannada script
+    "ರದ್ದು ಮಾಡು", "ರದ್ದು ಮಾಡಿ", "ತೆಗೆದುಹಾಕು", "ತೆಗೆದು ಹಾಕು", "ತೆಗೆದು ಹಾಕಿ", "ಕ್ಯಾನ್ಸಲ್ ಮಾಡು", "ಕ್ಯಾನ್ಸಲ್ ಮಾಡಿ", "ರದ್ದು",
+]
+
+
+def has_destructive_command(text: str) -> bool:
+    """Check if the user utterance contains an explicit command word for a destructive action."""
+    t = text.strip().lower()
+    return any(cmd in t for cmd in DESTRUCTIVE_COMMAND_WORDS)
+
+
 def _is_question(text: str) -> bool:
-    """Check if the user input looks like a question."""
+    """Check if the user input looks like a question in en, hi, kn."""
+    import re
     t = text.strip().lower()
     if "?" in t:
         return True
     question_starts = (
         "why", "what", "where", "when", "how", "who", "which", "whose", "whom",
-        "can you", "could you", "is it", "are you", "do you", "will you",
+        "can you", "could you", "would you", "is it", "are you", "do you", "will you",
         "kyun", "kyu", "kya", "kaise", "kab", "kaha", "kahan",
         "क्यों", "क्या", "कैसे", "कब", "कहाँ", "किस",
-        "enu", "yake", "hege", "yelli", "yavaga", "yaru",
-        "ಏನು", "ಯಾಕೆ", "ಹೇಗೆ", "ಎಲ್ಲಿ", "ಯಾವಾಗ", "ಯಾರು"
+        "enu", "yake", "eke", "hege", "yelli", "yavaga", "yaru",
+        "ಏನು", "ಯಾಕೆ", "ಏಕೆ", "ಹೇಗೆ", "ಎಲ್ಲಿ", "ಯಾವಾಗ", "ಯಾರು"
     )
     for q in question_starts:
         if t.startswith(q + " ") or t == q:
             return True
+
+    # Check for question words occurring anywhere in the text (e.g. "yeh abhi bhi kyun hai", "idu innu yake ide")
+    inner_words = set(re.findall(r'[\w\u0900-\u097F\u0C80-\u0CFF]+', t))
+    inner_question_words = {
+        "why", "what", "where", "when", "how",
+        "kyun", "kyu", "kya", "kaise",
+        "क्यों", "क्या", "कैसे",
+        "yake", "eke", "enu", "hege",
+        "ಯಾಕೆ", "ಏಕೆ", "ಏನು", "ಹೇಗೆ"
+    }
+    if inner_words & inner_question_words:
+        return True
+
     return False
 
 
@@ -282,7 +317,7 @@ async def process_turn(
         # Process tool calls
         if response.get("tool_calls"):
             for tc in response["tool_calls"]:
-                change = await _execute_tool(db, tc, now, language)
+                change = await _execute_tool(db, tc, now, language, user_text=user_text)
                 if change:
                     if change.get("type") == "batch_created":
                         task_changes.extend(change.get("items", []))
@@ -293,20 +328,11 @@ async def process_turn(
             reply_text = _generate_confirmation(task_changes, language, now=now)
         else:
             # Check if user asked to cancel/remove and tool wasn't invoked
-            text_lower = user_text.lower()
-            cancel_triggers = ["cancel", "remove", "delete", "hata do", "hatao", "radd karo", "raddu madi"]
-            found_trigger = None
-            for trigger in cancel_triggers:
-                if trigger in text_lower:
-                    found_trigger = trigger
-                    break
-            if found_trigger:
-                target = text_lower.split(found_trigger, 1)[1].replace("the", "").replace("my", "").strip()
-                if not target:
-                    target = text_lower.split(found_trigger, 1)[0].replace("the", "").replace("my", "").strip()
-                change = _handle_cancel_task(db, {"title": target})
-                task_changes.append(change)
-                reply_text = _generate_confirmation(task_changes, language, now=now)
+            if has_destructive_command(user_text):
+                change = _handle_cancel_task(db, {}, user_text=user_text, language=language)
+                if change:
+                    task_changes.append(change)
+                    reply_text = _generate_confirmation(task_changes, language, now=now)
 
         # Fallback when no task actions were detected / performed
         if not task_changes or not reply_text:
@@ -343,7 +369,7 @@ async def process_turn(
         db.close()
 
 
-async def _execute_tool(db, tool_call: dict, now: datetime, language: str) -> Optional[dict]:
+async def _execute_tool(db, tool_call: dict, now: datetime, language: str, user_text: str = "") -> Optional[dict]:
     """Execute a single tool call and return the result."""
     name = tool_call["name"]
     args = tool_call["arguments"]
@@ -370,7 +396,7 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str) -> Op
     elif name == "update_task":
         return _handle_update_task(db, args, now)
     elif name == "cancel_task":
-        return _handle_cancel_task(db, args)
+        return _handle_cancel_task(db, args, user_text=user_text, language=language)
     elif name == "ask_clarification":
         return {"type": "clarification", "question": args.get("question", "")}
 
@@ -544,8 +570,14 @@ def _handle_update_task(db, args: dict, now: datetime) -> dict:
     }
 
 
-def _handle_cancel_task(db, args: dict) -> dict:
-    """Cancel a task."""
+def _handle_cancel_task(db, args: dict, user_text: str = "", language: str = "en") -> dict:
+    """
+    Cancel a task with safety checks:
+    - Rule 1: No command word in user_text -> NEVER execute destructive action.
+    - Rule 2: Command word AND question phrasing together -> do NOT execute silently; ask "Should I cancel <title>?"
+    - Rule 3: Plain command -> execute directly.
+    - Not-found: only offer "did you mean" when score passes cutoff (otherwise closest is None).
+    """
     from agent.matcher import find_task_by_title
     task_id = args.get("task_id")
     target_title = (args.get("title") or "").strip()
@@ -554,7 +586,26 @@ def _handle_cancel_task(db, args: dict) -> dict:
         Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
     ).all()
 
-    # Prioritize matching target_title if provided (avoids arbitrary LLM task_id on ambiguous queries)
+    # Rule 1: No explicit command word in the current utterance
+    if user_text and not has_destructive_command(user_text):
+        if _is_question(user_text):
+            return {"type": "question_help"}
+        return {"type": "not_command_blocked"}
+
+    # Extract target title from user_text if not provided in args
+    if not target_title and user_text:
+        text_lower = user_text.lower()
+        found_cmd = None
+        for cmd in DESTRUCTIVE_COMMAND_WORDS:
+            if cmd in text_lower:
+                found_cmd = cmd
+                break
+        if found_cmd:
+            target_title = text_lower.split(found_cmd, 1)[1].replace("the", "").replace("my", "").replace("ko", "").replace("annu", "").strip()
+            if not target_title:
+                target_title = text_lower.split(found_cmd, 1)[0].replace("the", "").replace("my", "").replace("ko", "").replace("annu", "").strip()
+
+    task = None
     if target_title:
         status, task, candidates = find_task_by_title(db, target_title, active_tasks=active_tasks, cutoff=0.6, margin=0.1)
         if status == "ambiguous":
@@ -567,7 +618,7 @@ def _handle_cancel_task(db, args: dict) -> dict:
             return {
                 "type": "cancel_not_found",
                 "target": target_title,
-                "closest": candidates[0] if candidates else (active_tasks[0].title if active_tasks else None),
+                "closest": None,
             }
     elif task_id:
         try:
@@ -580,15 +631,24 @@ def _handle_cancel_task(db, args: dict) -> dict:
             return {
                 "type": "cancel_not_found",
                 "target": str(task_id),
-                "closest": active_tasks[0].title if active_tasks else None,
+                "closest": None,
             }
     else:
         return {
             "type": "cancel_not_found",
             "target": "",
-            "closest": active_tasks[0].title if active_tasks else None,
+            "closest": None,
         }
 
+    # Rule 2: Command word AND question phrasing together -> do NOT execute silently; ask "Should I cancel <title>?"
+    if user_text and _is_question(user_text):
+        return {
+            "type": "destructive_confirm_prompt",
+            "title": task.title,
+            "language": language,
+        }
+
+    # Rule 3: Direct command -> execute cancellation!
     task.status = TaskStatus.CANCELLED.value
     db.commit()
 
@@ -603,9 +663,22 @@ def _generate_confirmation(task_changes: list, language: str, now: Optional[date
     """Generate a clean, spoken confirmation sentence in the user's language."""
     from agent.replies import (
         format_created, format_cancelled, format_cancel_not_found,
-        format_fallback, format_ambiguous
+        format_fallback, format_ambiguous, format_cancel_confirm_prompt,
+        format_question_help
     )
     if not task_changes:
+        return format_fallback(language)
+
+    # Check for confirmation prompt ("Should I cancel <title>?")
+    confirm_prompts = [c for c in task_changes if c.get("type") == "destructive_confirm_prompt"]
+    if confirm_prompts:
+        return format_cancel_confirm_prompt(confirm_prompts[0].get("title", "this task"), language)
+
+    # Check for question help
+    if any(c.get("type") == "question_help" for c in task_changes):
+        return format_question_help(language)
+
+    if any(c.get("type") == "not_command_blocked" for c in task_changes):
         return format_fallback(language)
 
     # Check for ambiguity first!

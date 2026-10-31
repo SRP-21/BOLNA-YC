@@ -19,6 +19,7 @@ REPLIES = {
         "cancelled": "Cancelled {title}.",
         "cancel_closest": "Could not find that task. Did you mean '{closest}'?",
         "cancel_not_found": "Could not find that task to cancel.",
+        "cancel_confirm_prompt": "Should I cancel {title}?",
         "ambiguous_which": "Which one did you mean: {candidates}?",
         "already_done": "{title} is already marked as done.",
         "question_help": "I can set, move, snooze or cancel reminders. What would you like to do?",
@@ -39,6 +40,7 @@ REPLIES = {
         "cancelled": "{title} रद्द कर दिया गया है।",
         "cancel_closest": "वह कार्य नहीं मिला। क्या आपका मतलब '{closest}' था?",
         "cancel_not_found": "रद्द करने के लिए वह कार्य नहीं मिला।",
+        "cancel_confirm_prompt": "क्या मैं {title} को रद्द कर दूँ?",
         "ambiguous_which": "आपका कौन सा मतलब था: {candidates}?",
         "already_done": "{title} पहले ही पूरा हो चुका है।",
         "question_help": "मैं रिमाइंडर सेट, आगे बढ़ा, स्नूज़ या रद्द कर सकता हूँ। आप क्या करना चाहते हैं?",
@@ -59,6 +61,7 @@ REPLIES = {
         "cancelled": "{title} ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ.",
         "cancel_closest": "ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ. ನೀವು '{closest}' ಅನ್ನು ಉಲ್ಲೇಖಿಸಿದ್ದೀರಾ?",
         "cancel_not_found": "ರದ್ದುಗೊಳಿಸಲು ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ.",
+        "cancel_confirm_prompt": "ನಾನು {title} ಅನ್ನು ರದ್ದುಗೊಳಿಸಬೇಕೇ?",
         "ambiguous_which": "ನಿಮ್ಮ ಉದ್ದೇಶ ಯಾವುದು: {candidates}?",
         "already_done": "{title} ಈಗಾಗಲೇ ಮುಕ್ತಾಯಗೊಂಡಿದೆ.",
         "question_help": "ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಬಹುದು, ಮುಂದೂಡಬಹುದು, ಸ್ನೂಜ್ ಮಾಡಬಹುದು ಅಥವಾ ರದ್ದುಗೊಳಿಸಬಹುದು. ನೀವು ಏನು ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
@@ -212,6 +215,11 @@ def format_rescheduled(title: str, time_str: str, language: str = "en") -> str:
 def format_reminder_prompt(title: str, time_str: str, language: str = "en") -> str:
     tmpl = get_template("reminder_prompt", language)
     return tmpl.format(title=title, time=time_str)
+
+
+def format_cancel_confirm_prompt(title: str, language: str = "en") -> str:
+    tmpl = get_template("cancel_confirm_prompt", language)
+    return tmpl.format(title=title)
 
 
 def format_question_help(language: str = "en") -> str:

@@ -103,8 +103,8 @@ async def test_problem_a_cancel_success_and_closest_match():
             ]
         }
         res_not_found = await process_turn("cancel doctor", language="en", now=FROZEN_NOW)
-        assert "Could not find that task" in res_not_found["reply_text"]
-        assert "Dentist Checkup" in res_not_found["reply_text"]
+        assert res_not_found["reply_text"] == "Could not find that task to cancel."
+        assert "Dentist Checkup" not in res_not_found["reply_text"]
 
 
 @pytest.mark.asyncio

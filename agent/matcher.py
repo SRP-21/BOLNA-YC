@@ -73,12 +73,9 @@ def find_task_by_title(
     best_task, best_score = scored[0]
     second_task, second_score = scored[1] if len(scored) > 1 else (None, 0.0)
 
-    # If even the best match is below cutoff
+    # If even the best match is below cutoff, do NOT suggest closest; return no matching candidates
     if best_score < cutoff:
-        # Check if any candidate has score >= 0.15 for 'closest' suggestion
-        closest_candidates = [t.title for t, s in scored if s >= 0.15]
-        closest = closest_candidates[0] if closest_candidates else (active_tasks[0].title if active_tasks else "")
-        return ("not_found", None, [closest] if closest else [])
+        return ("not_found", None, [])
 
     # Check ambiguity:
     # 1. Multiple matches above cutoff and margin < 0.1

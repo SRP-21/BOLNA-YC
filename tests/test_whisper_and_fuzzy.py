@@ -106,7 +106,7 @@ def test_doctor_does_not_match_dentist_checkup():
 
     result = _handle_cancel_task(db, {"title": "doctor"})
     assert result["type"] == "cancel_not_found"
-    assert result["closest"] == "Dentist Checkup"
+    assert result["closest"] is None
 
     updated = db.query(Task).filter_by(id=t.id).first()
     assert updated.status == TaskStatus.SCHEDULED.value
