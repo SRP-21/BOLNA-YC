@@ -90,22 +90,36 @@ def format_time_hindi(dt: datetime) -> str:
     """
     Hindi time of day:
     - Drops minutes when :00 ('सुबह 9 बजे', 'शाम 6 बजे')
-    - Says 'साढ़े <H>' for :30 ('दोपहर साढ़े 12 बजे', 'शाम साढ़े 7 बजे')
-    - Never outputs AM or PM
-    # TODO: In colloquial Hindi, 1:30 is 'डेढ़' and 2:30 is 'ढाई'. Using 'साढ़े 1' / 'साढ़े 2' per prompt rule.
-    # TODO: Review colloquial phrases for non-:00 / non-:30 minutes (e.g. सवा, पौने, or बजकर मिनट).
+    - 1:30 -> 'डेढ़ बजे', 2:30 -> 'ढाई बजे'
+    - Other :30 stay 'साढ़े <H> बजे' ('दोपहर साढ़े 12 बजे', 'शाम साढ़े 7 बजे')
+    - :15 -> 'सवा <H> बजे' ('सुबह सवा 9 बजे')
+    - :45 -> 'पौने <H+1> बजे' (12:45 -> 'पौने एक बजे')
+    - Any other minutes -> '<H> बजकर <M> मिनट'
+    - Never outputs AM or PM.
     """
     period = get_period_of_day(dt.hour, language="hi")
     h = dt.hour % 12
     if h == 0:
         h = 12
     m = dt.minute
+
     if m == 0:
         return f"{period} {h} बजे"
     elif m == 30:
-        return f"{period} साढ़े {h} बजे"
+        if h == 1:
+            return f"{period} डेढ़ बजे"
+        elif h == 2:
+            return f"{period} ढाई बजे"
+        else:
+            return f"{period} साढ़े {h} बजे"
+    elif m == 15:
+        return f"{period} सवा {h} बजे"
+    elif m == 45:
+        next_h = 1 if h == 12 else (h + 1)
+        next_h_str = "एक" if next_h == 1 else str(next_h)
+        return f"{period} पौने {next_h_str} बजे"
     else:
-        return f"{period} {h}:{m:02d} बजे"
+        return f"{period} {h} बजकर {m} मिनट"
 
 
 def format_time_kannada(dt: datetime) -> str:
@@ -113,8 +127,7 @@ def format_time_kannada(dt: datetime) -> str:
     Kannada time of day:
     - Drops :00 ('ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆಗೆ', 'ಸಂಜೆ 6 ಗಂಟೆಗೆ')
     - Formats minutes without AM or PM ('ಮಧ್ಯಾಹ್ನ 12:30 ಗಂಟೆಗೆ', 'ಸಂಜೆ 7:30 ಗಂಟೆಗೆ')
-    - Never outputs AM or PM
-    # TODO: Review Kannada colloquial phrasing for minutes (e.g. 12:30 ಗಂಟೆಗೆ vs 12 ಗಂಟೆ 30 ನಿಮಿಷಕ್ಕೆ).
+    - Never outputs AM or PM.
     """
     period = get_period_of_day(dt.hour, language="kn")
     h = dt.hour % 12
@@ -146,8 +159,8 @@ def format_time_spoken(dt: Optional[datetime], language: str = "en") -> str:
 def format_time_for_reminder(dt_or_str, language: str = "en") -> str:
     """
     Format time specifically for reminder prompts:
-    - hi: '{time} बज गए हैं' -> time is 'सुबह 9', 'शाम 6', 'दोपहर साढ़े 12'
-    - kn: 'ಸಮಯ {time} ಆಗಿದೆ' -> time is 'ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆ', 'ಸಂಜೆ 6 ಗಂಟೆ', 'ಮಧ್ಯಾಹ್ನ 12:30 ಗಂಟೆ'
+    - hi: hour 1 uses singular 'बज गया है', others use 'बज गए हैं'
+    - kn: 'ಸಮಯ {time} ಆಗಿದೆ' -> time is 'ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆ', 'ಸಂಜೆ 6 ಗಂಟೆ'
     - en: 'it's {time}' -> time is '6:00 PM'
     """
     dt = None
@@ -169,12 +182,31 @@ def format_time_for_reminder(dt_or_str, language: str = "en") -> str:
         if h == 0:
             h = 12
         m = dt.minute
+
+        # Determine phrase and whether it refers to hour 1 (singular)
+        is_singular = (h == 1 and m != 45) or (h == 12 and m == 45)
+
+        verb = "बज गया है" if is_singular else "बज गए हैं"
         if m == 0:
-            return f"{period} {h}"
+            time_part = f"{period} {h}"
         elif m == 30:
-            return f"{period} साढ़े {h}"
+            if h == 1:
+                time_part = f"{period} डेढ़"
+            elif h == 2:
+                time_part = f"{period} ढाई"
+            else:
+                time_part = f"{period} साढ़े {h}"
+        elif m == 15:
+            time_part = f"{period} सवा {h}"
+        elif m == 45:
+            next_h = 1 if h == 12 else (h + 1)
+            next_h_str = "एक" if next_h == 1 else str(next_h)
+            time_part = f"{period} पौने {next_h_str}"
         else:
-            return f"{period} {h}:{m:02d}"
+            time_part = f"{period} {h} बजकर {m} मिनट"
+
+        return f"{time_part} {verb}"
+
     elif language == "kn":
         period = get_period_of_day(dt.hour, language="kn")
         h = dt.hour % 12
