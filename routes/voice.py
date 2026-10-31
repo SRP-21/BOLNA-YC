@@ -13,8 +13,19 @@ from providers.registry import registry
 from db import SessionLocal, Task, TaskStatus
 from config import settings
 
+import re
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+STOP_TRAILING_RE = re.compile(r"(?:^|[\s,;.-]+)\bstop\b[\s.!?]*$", re.IGNORECASE)
+
+
+def strip_trailing_stop(text: Optional[str]) -> str:
+    """Strip a trailing standalone 'stop' from transcript before planning."""
+    if not text:
+        return ""
+    return STOP_TRAILING_RE.sub("", text.strip()).strip()
 
 
 def is_hint_echo(transcript: str, hint: Optional[str]) -> bool:
@@ -85,7 +96,7 @@ async def voice_turn(
                 "fallback": "text",
             })
 
-        user_text = stt_result.text
+        user_text = strip_trailing_stop(stt_result.text)
         detected_language = stt_result.language
 
         # Treat empty or hint-echoed transcripts as unclear
@@ -144,7 +155,17 @@ async def text_turn(
     """
     try:
         from agent.lang import detect_language
-        eff_lang = language if (language and language != "en") else detect_language(text, fallback="en")
+        cleaned_text = strip_trailing_stop(text)
+        if not cleaned_text.strip():
+            return JSONResponse(content={
+                "transcript": "",
+                "reply_text": "I didn't catch that. Could you say it again?",
+                "tts_fallback": True,
+                "tts_provider_used": "browser",
+                "task_changes": [],
+                "language": language or "en",
+            })
+        eff_lang = language if (language and language != "en") else detect_language(cleaned_text, fallback="en")
         turn_now = None
         if now and getattr(settings, "enable_test_clock", False):
             from datetime import datetime
@@ -153,7 +174,7 @@ async def text_turn(
                 turn_now = ensure_ist(datetime.fromisoformat(now))
             except Exception:
                 turn_now = None
-        result = await process_turn(text, eff_lang, now=turn_now)
+        result = await process_turn(cleaned_text, eff_lang, now=turn_now)
         final_lang = result.get("language") or eff_lang
 
         # TTS for the reply

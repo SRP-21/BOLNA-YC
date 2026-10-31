@@ -36,6 +36,7 @@
     }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="/static/vad.js"></script>
   <style>
     /* Custom scrollbars */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -434,6 +435,10 @@
     let isRecording = false;
     let silenceTimer = null;
     let analyserNode = null;
+    let vadDetector = null;
+    let vadIntervalId = null;
+    let discardCurrentRecording = false;
+    let hasHeardSpeech = false;
     let animFrameId = null;
     let activeReminderTaskId = null;
     let activeReminderAudio = null;
@@ -826,18 +831,39 @@
 
     async function startRecording(forReminder = false) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          }
+        });
         isRecording = true;
         audioChunks = [];
+        hasHeardSpeech = false;
+        discardCurrentRecording = false;
 
-        // Audio Context & Analyser for visualizer & silence detection
+        // Audio Context & Analyser for visualizer & adaptive VAD
         if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') await audioContext.resume();
 
         const source = audioContext.createMediaStreamSource(stream);
         analyserNode = audioContext.createAnalyser();
-        analyserNode.fftSize = 64;
+        analyserNode.fftSize = 256;
         source.connect(analyserNode);
+
+        // Initialize adaptive VAD
+        if (typeof AdaptiveVAD !== 'undefined') {
+          vadDetector = new AdaptiveVAD({
+            calibrationMs: 400,
+            multiplier: 3.0,
+            minThreshold: 0.015,
+            minSpeechMs: 300,
+            endSilenceMs: 1100,
+            noSpeechTimeoutMs: 6000,
+            hardCapMs: 20000,
+          });
+        }
 
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         mediaRecorder.ondataavailable = (e) => {
@@ -846,21 +872,29 @@
 
         mediaRecorder.onstop = async () => {
           stream.getTracks().forEach(t => t.stop());
-          cancelAnimationFrame(animFrameId);
           resetWaveform();
+          if (discardCurrentRecording) {
+            discardCurrentRecording = false;
+            audioChunks = [];
+            return;
+          }
           const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          audioChunks = [];
           if (audioBlob.size > 1000) {
+            setAgentState('thinking', 'Thinking...', 'Analyzing your speech with Groq Whisper & LLM...');
             if (forReminder && activeReminderTaskId) {
               await sendReminderVoiceReply(audioBlob);
             } else {
               await sendVoiceTurn(audioBlob);
             }
+          } else {
+            setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
           }
         };
 
         mediaRecorder.start(250);
         setAgentState('listening', 'Listening...', 'Speak now. Pausing will automatically finish.');
-        startVisualizerAndSilenceDetection();
+        startVisualizerAndSilenceDetection(forReminder);
       } catch (err) {
         console.error('Microphone error:', err);
         setAgentState('idle', 'Microphone Error', 'Check permissions or use text fallback below.');
@@ -869,53 +903,70 @@
     }
 
     function stopRecording() {
+      if (vadIntervalId) {
+        clearInterval(vadIntervalId);
+        vadIntervalId = null;
+      }
+      if (isRecording) {
+        isRecording = false;
+        if (hasHeardSpeech && !discardCurrentRecording) {
+          setAgentState('thinking', 'Thinking...', 'Analyzing your speech with Groq Whisper & LLM...');
+        }
+      }
       if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
       }
-      isRecording = false;
       if (silenceTimer) clearTimeout(silenceTimer);
     }
 
-    function startVisualizerAndSilenceDetection() {
-      const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
-      let silenceStart = null;
-      const SILENCE_THRESHOLD = 15; // Noise floor threshold
-      const SILENCE_DURATION_MS = 1800; // 1.8s silence triggers auto-stop
-
+    function startVisualizerAndSilenceDetection(forReminder) {
+      const timeData = new Float32Array(analyserNode.fftSize);
       silenceIndicator.classList.remove('hidden');
 
-      function checkAudio() {
+      // Use a fixed 50 ms timer instead of requestAnimationFrame so it does not throttle when tab loses focus
+      vadIntervalId = setInterval(() => {
         if (!isRecording) return;
-        analyserNode.getByteFrequencyData(dataArray);
+        analyserNode.getFloatTimeDomainData(timeData);
 
-        // Calculate average volume
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        const avg = sum / dataArray.length;
+        // Calculate RMS of audio frame
+        let sumSquares = 0;
+        for (let i = 0; i < timeData.length; i++) {
+          sumSquares += timeData[i] * timeData[i];
+        }
+        const rms = Math.sqrt(sumSquares / timeData.length);
 
         // Animate waveform bars
         waveformBars.forEach((bar, index) => {
-          const val = dataArray[index % dataArray.length] || 10;
-          const height = Math.max(4, Math.min(28, (val / 255) * 32));
+          const height = Math.max(4, Math.min(28, Math.round(rms * 160) + (index % 3) * 2));
           bar.style.height = `${height}px`;
         });
 
-        // Silence detection
-        if (avg < SILENCE_THRESHOLD) {
-          if (!silenceStart) {
-            silenceStart = Date.now();
-          } else if (Date.now() - silenceStart > SILENCE_DURATION_MS) {
-            // Auto stop!
-            stopRecording();
-            return;
-          }
-        } else {
-          silenceStart = null;
+        if (!vadDetector) return;
+        const res = vadDetector.processFrame(rms, 50);
+
+        if (res.state === 'hearing') {
+          hasHeardSpeech = true;
+          setAgentState('hearing', 'Hearing you...', 'Listening to what you say...');
+        } else if (res.state === 'listening' || res.state === 'calibrating') {
+          setAgentState('listening', 'Listening...', 'Speak now. Pausing will automatically finish.');
         }
 
-        animFrameId = requestAnimationFrame(checkAudio);
-      }
-      animFrameId = requestAnimationFrame(checkAudio);
+        if (res.isFinal) {
+          clearInterval(vadIntervalId);
+          vadIntervalId = null;
+
+          if (res.reason === 'no_speech') {
+            discardCurrentRecording = true;
+            stopRecording();
+            speakText("I didn't hear anything.");
+            setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+          } else {
+            // speech_end or hard_cap: Show Thinking immediately when recording ends!
+            setAgentState('thinking', 'Thinking...', 'Analyzing your speech with Groq Whisper & LLM...');
+            stopRecording();
+          }
+        }
+      }, 50);
     }
 
     function resetWaveform() {
@@ -1030,8 +1081,14 @@
 
       if (state === 'listening') {
         heroMicBtn.className = 'relative z-10 w-24 h-24 rounded-full bg-red-600 hover:bg-red-500 text-white shadow-xl shadow-red-500/30 flex flex-col items-center justify-center transition-all transform scale-105';
-        heroMicIcon.className = 'fa-solid fa-stop text-3xl animate-pulse';
+        heroMicIcon.className = 'fa-solid fa-microphone text-3xl animate-pulse';
         heroMicLabel.textContent = 'Listening';
+        micRipple.classList.remove('hidden');
+        micSpinner.classList.add('hidden');
+      } else if (state === 'hearing') {
+        heroMicBtn.className = 'relative z-10 w-24 h-24 rounded-full bg-amber-500 hover:bg-amber-400 text-white shadow-xl shadow-amber-500/30 flex flex-col items-center justify-center transition-all transform scale-105';
+        heroMicIcon.className = 'fa-solid fa-wave-square text-3xl animate-pulse';
+        heroMicLabel.textContent = 'Hearing you';
         micRipple.classList.remove('hidden');
         micSpinner.classList.add('hidden');
       } else if (state === 'thinking') {
