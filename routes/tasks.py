@@ -109,6 +109,12 @@ async def fire_now(task_id: int):
         if not task:
             return JSONResponse(status_code=404, content={"error": "Task not found"})
 
+        if task.status in (TaskStatus.DONE.value, TaskStatus.CANCELLED.value):
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Cannot fire reminder for task with status '{task.status}'"}
+            )
+
         task.status = TaskStatus.DUE.value
         db.commit()
 
@@ -155,6 +161,41 @@ async def reminder_reply(
         elif reply_text:
             from agent.lang import detect_language
             reply_lang = detect_language(reply_text, fallback=task.language or "en")
+
+        # Reject replies on tasks that are already done or cancelled
+        if task.status == TaskStatus.DONE.value:
+            from agent.replies import format_already_done
+            reply_message = format_already_done(task.title, reply_lang)
+            tts_result = await registry.synthesize(reply_message, reply_lang)
+            response = {
+                "outcome": "already_done",
+                "reply_text": reply_message,
+                "task_id": task.id,
+                "language": reply_lang,
+                "tts_fallback": tts_result.use_browser_tts,
+                "tts_provider_used": tts_result.provider,
+            }
+            if not tts_result.use_browser_tts and tts_result.audio_bytes:
+                response["audio_base64"] = base64.b64encode(tts_result.audio_bytes).decode()
+                response["audio_mime"] = tts_result.mime_type
+            return JSONResponse(content=response)
+
+        if task.status == TaskStatus.CANCELLED.value:
+            from agent.replies import format_cancelled
+            reply_message = format_cancelled(task.title, reply_lang)
+            tts_result = await registry.synthesize(reply_message, reply_lang)
+            response = {
+                "outcome": "already_cancelled",
+                "reply_text": reply_message,
+                "task_id": task.id,
+                "language": reply_lang,
+                "tts_fallback": tts_result.use_browser_tts,
+                "tts_provider_used": tts_result.provider,
+            }
+            if not tts_result.use_browser_tts and tts_result.audio_bytes:
+                response["audio_base64"] = base64.b64encode(tts_result.audio_bytes).decode()
+                response["audio_mime"] = tts_result.mime_type
+            return JSONResponse(content=response)
 
         # Parse outcome
         outcome = await parse_outcome(reply_text, task.title)

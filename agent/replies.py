@@ -20,6 +20,7 @@ REPLIES = {
         "cancel_closest": "Could not find that task. Did you mean '{closest}'?",
         "cancel_not_found": "Could not find that task to cancel.",
         "ambiguous_which": "Which one did you mean: {candidates}?",
+        "already_done": "{title} is already marked as done.",
         "question_help": "I can set, move, snooze or cancel reminders. What would you like to do?",
         "fallback_not_caught": "I didn't catch a task or time in that. Try something like 'dentist at 5 pm tomorrow'.",
         "needs_confirmation": "I've set {title} for {time}. Please confirm if that works.",
@@ -39,6 +40,7 @@ REPLIES = {
         "cancel_closest": "वह कार्य नहीं मिला। क्या आपका मतलब '{closest}' था?",
         "cancel_not_found": "रद्द करने के लिए वह कार्य नहीं मिला।",
         "ambiguous_which": "आपका कौन सा मतलब था: {candidates}?",
+        "already_done": "{title} पहले ही पूरा हो चुका है।",
         "question_help": "मैं रिमाइंडर सेट, आगे बढ़ा, स्नूज़ या रद्द कर सकता हूँ। आप क्या करना चाहते हैं?",
         "fallback_not_caught": "मुझे इसमें कोई कार्य या समय नहीं मिला। जैसे कहें: 'कल शाम 5 बजे डेंटिस्ट'।",
         "needs_confirmation": "मैंने {title} {time} पर सेट किया है। कृपया पुष्टि करें कि क्या यह समय सही है।",
@@ -58,6 +60,7 @@ REPLIES = {
         "cancel_closest": "ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ. ನೀವು '{closest}' ಅನ್ನು ಉಲ್ಲೇಖಿಸಿದ್ದೀರಾ?",
         "cancel_not_found": "ರದ್ದುಗೊಳಿಸಲು ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ.",
         "ambiguous_which": "ನಿಮ್ಮ ಉದ್ದೇಶ ಯಾವುದು: {candidates}?",
+        "already_done": "{title} ಈಗಾಗಲೇ ಮುಕ್ತಾಯಗೊಂಡಿದೆ.",
         "question_help": "ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಬಹುದು, ಮುಂದೂಡಬಹುದು, ಸ್ನೂಜ್ ಮಾಡಬಹುದು ಅಥವಾ ರದ್ದುಗೊಳಿಸಬಹುದು. ನೀವು ಏನು ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
         "fallback_not_caught": "ಅದರಲ್ಲಿ ನನಗೆ ಯಾವುದೇ ಕಾರ್ಯ ಅಥವಾ ಸಮಯ ಕಂಡುಬಂದಿಲ್ಲ. ಉದಾಹರಣೆಗೆ 'ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ ದಂತವೈದ್ಯರ ಭೇಟಿ' ಎಂದು ಹೇಳಿ ನೋಡಿ.",
         "needs_confirmation": "ನಾನು {title} ಅನ್ನು {time} ಕ್ಕೆ ಹೊಂದಿಸಿದ್ದೇನೆ. ಇದು ಸರಿಹೊಂದುತ್ತದೆಯೇ ಎಂದು ದೃಢೀಕರಿಸಿ.",
@@ -194,6 +197,11 @@ def format_ambiguous(candidates: list, language: str = "en") -> str:
     else:
         cand_str = " or ".join(candidates)
     return tmpl.format(candidates=cand_str)
+
+
+def format_already_done(title: str, language: str = "en") -> str:
+    tmpl = get_template("already_done", language)
+    return tmpl.format(title=title)
 
 
 def format_rescheduled(title: str, time_str: str, language: str = "en") -> str:

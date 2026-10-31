@@ -60,3 +60,34 @@ def test_outcome_cancel_variations():
         assert res is not None, f"Failed on: {phrase}"
         assert res.outcome == "cancel"
 
+
+def test_done_task_cannot_be_rescheduled_via_reply():
+    """A task that is already marked 'done' rejects rescheduling and returns 'already marked as done'."""
+    from datetime import datetime
+    from starlette.testclient import TestClient
+    from main import app
+    from db import init_db, SessionLocal, Task, TaskStatus
+
+    init_db()
+    db = SessionLocal()
+    db.query(Task).delete()
+    t = Task(title="Send invoice", due_at=datetime(2026, 10, 31, 12, 30), status=TaskStatus.DONE.value, language="en")
+    db.add(t)
+    db.commit()
+    task_id = t.id
+    db.close()
+
+    client = TestClient(app)
+    resp = client.post(f"/api/reminders/{task_id}/reply", data={"text": "kal subah"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["outcome"] == "already_done"
+    assert "already" in data["reply_text"].lower() or "पहले" in data["reply_text"]
+
+    # Verify task in DB is still DONE, not scheduled
+    db = SessionLocal()
+    refreshed = db.query(Task).filter_by(id=task_id).first()
+    assert refreshed.status == TaskStatus.DONE.value
+    db.close()
+
+
