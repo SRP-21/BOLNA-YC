@@ -116,6 +116,80 @@ async def process_turn(
         db.add(user_utt)
         db.commit()
 
+        # Check confirmation / undo rule before anything else
+        from agent.replan import (
+            parse_confirmation_rule, get_pending_plan, set_pending_plan,
+            extract_replan_intent, compute_replan
+        )
+        from agent.replan_engine import apply_replan_commit, apply_replan_undo
+        conf_rule = parse_confirmation_rule(user_text)
+
+        if conf_rule == "undo":
+            res = apply_replan_undo(db)
+            if res.get("ok"):
+                if language == "hi":
+                    reply_text = "पिछला बदलाव वापस कर दिया गया है।"
+                elif language == "kn":
+                    reply_text = "ಹಿಂದಿನ ವೇಳಾಪಟ್ಟಿ ಬದಲಾವಣೆಯನ್ನು ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ."
+                else:
+                    reply_text = "Reverted your last schedule change."
+            else:
+                if language == "hi":
+                    reply_text = "वापस करने के लिए कोई पिछला बदलाव नहीं मिला।"
+                elif language == "kn":
+                    reply_text = "ರದ್ದುಗೊಳಿಸಲು ಯಾವುದೇ ಹಿಂದಿನ ಬದಲಾವಣೆಗಳಿಲ್ಲ."
+                else:
+                    reply_text = "Nothing to undo."
+            agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+            db.add(agent_utt)
+            db.commit()
+            log_event("agent_reply", reply_text)
+            return {"reply_text": reply_text, "task_changes": [], "language": language}
+
+        # Check pending replan confirmation (yes / no)
+        pending_plan = get_pending_plan()
+        if pending_plan and conf_rule in ("yes", "no"):
+            if conf_rule == "yes":
+                apply_replan_commit(db, pending_plan, reason=pending_plan.reason)
+                set_pending_plan(None)
+                if language == "hi":
+                    reply_text = "शेड्यूल अपडेट कर दिया गया है।"
+                elif language == "kn":
+                    reply_text = "ನಿಮ್ಮ ವೇಳಾಪಟ್ಟಿಯನ್ನು ನವೀಕರಿಸಲಾಗಿದೆ."
+                else:
+                    reply_text = "Done, I've updated your schedule."
+            else:
+                set_pending_plan(None)
+                if language == "hi":
+                    reply_text = "ठीक है, शेड्यूल पहले जैसा ही रखा गया है।"
+                elif language == "kn":
+                    reply_text = "ಸರಿ, ವೇಳಾಪಟ್ಟಿಯನ್ನು ಬದಲಾಯಿಸಿಲ್ಲ."
+                else:
+                    reply_text = "Okay, I kept your schedule as it was."
+
+            agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+            db.add(agent_utt)
+            db.commit()
+            log_event("agent_reply", reply_text)
+            return {"reply_text": reply_text, "task_changes": [], "language": language}
+
+        # Check if user requested replan ("push everything by 45 min", "free after 5", "swap invoice and groceries", etc.)
+        replan_intent = await extract_replan_intent(user_text, now)
+        if replan_intent:
+            plan = compute_replan(db, replan_intent, now=now, language=language)
+            set_pending_plan(plan)
+            reply_text = plan.summary.get(language, plan.summary.get("en", "I'll update your schedule. Okay?"))
+            agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+            db.add(agent_utt)
+            db.commit()
+            log_event("agent_reply", reply_text)
+            return {
+                "reply_text": reply_text,
+                "task_changes": [c.to_dict() for c in plan.changes],
+                "replan_preview": plan.to_dict(),
+                "language": language,
+            }
+
         # FIX D: Deterministic ambiguity check before LLM acts
         from agent.matcher import find_task_by_title
         from agent.replies import format_ambiguous
@@ -332,6 +406,14 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
     from scheduler import schedule_task_reminder
     schedule_task_reminder(task.id, resolved.dt)
 
+    # Conflict detection
+    from agent.conflicts import detect_conflicts
+    active_tasks = db.query(Task).filter(
+        Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
+    ).all()
+    conflicts = detect_conflicts(active_tasks, default_duration_minutes=settings.default_task_duration_minutes)
+    conflict = next((c for c in conflicts if c.task_1.id == task.id or c.task_2.id == task.id), None)
+
     return {
         "type": "created",
         "task_id": task.id,
@@ -343,6 +425,8 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
         "is_fixed": task.is_fixed,
         "duration_minutes": task.duration_minutes,
         "category": task.category,
+        "conflict": conflict.to_dict() if conflict else None,
+        "conflict_obj": conflict,
     }
 
 
@@ -392,11 +476,21 @@ def _handle_update_task(db, args: dict, now: datetime) -> dict:
     db.commit()
     log_event("task_updated", f"Updated: {task.title}", task_id=task.id)
 
+    # Conflict detection
+    from agent.conflicts import detect_conflicts
+    active_tasks = db.query(Task).filter(
+        Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
+    ).all()
+    conflicts = detect_conflicts(active_tasks, default_duration_minutes=settings.default_task_duration_minutes)
+    conflict = next((c for c in conflicts if c.task_1.id == task.id or c.task_2.id == task.id), None)
+
     return {
         "type": "updated",
         "task_id": task.id,
         "title": task.title,
         "due_at": ensure_ist(task.due_at).isoformat() if task.due_at else None,
+        "conflict": conflict.to_dict() if conflict else None,
+        "conflict_obj": conflict,
     }
 
 
@@ -482,5 +576,11 @@ def _generate_confirmation(task_changes: list, language: str, now: Optional[date
     clarifications = [c for c in task_changes if c.get("type") == "clarification"]
     if clarifications:
         return clarifications[0].get("question", "")
+
+    # Check for conflict warning
+    conflict_change = next((c for c in task_changes if c.get("conflict_obj")), None)
+    if conflict_change and conflict_change.get("conflict_obj"):
+        from agent.conflicts import format_conflict_sentence
+        return format_conflict_sentence(conflict_change["conflict_obj"], language=language, now=now)
 
     return format_created(task_changes, language, now=now)
