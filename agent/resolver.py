@@ -101,6 +101,8 @@ def resolve_time(
             is_tomorrow = True
             break
 
+    is_today = any(w in phrase_lower for w in ["today", "aaj", "आज", "indu", "ಇಂದು"])
+
     # Context indicators for AM/PM from surrounding words
     has_morning = any(w in phrase_lower for w in ["subah", "morning", "beligge", "am", "सुबह", "ಬೆಳಿಗ್ಗೆ"])
     has_evening = any(w in phrase_lower for w in ["shaam", "evening", "sanje", "pm", "raat", "night", "शाम", "रात", "ಸಂಜೆ", "ರಾತ್ರಿ"])
@@ -158,8 +160,8 @@ def resolve_time(
             resolved_date.year, resolved_date.month, resolved_date.day,
             hour, minute, tzinfo=IST
         )
-        # If the resolved time is in the past today, push to tomorrow
-        if resolved <= now and not is_tomorrow:
+        # If the resolved time is in the past today, push to tomorrow (unless explicitly marked today)
+        if resolved <= now and not is_tomorrow and not is_today:
             resolved += timedelta(days=1)
             reasoning += "; pushed to tomorrow (was in past)"
 

@@ -135,6 +135,7 @@ async def voice_turn(
 async def text_turn(
     text: str = Form(...),
     language: Optional[str] = Form(None),
+    now: Optional[str] = Form(None),
 ):
     """
     Text input fallback — goes through the exact same pipeline.
@@ -143,7 +144,15 @@ async def text_turn(
     try:
         from agent.lang import detect_language
         eff_lang = language if (language and language != "en") else detect_language(text, fallback="en")
-        result = await process_turn(text, eff_lang)
+        turn_now = None
+        if now:
+            from datetime import datetime
+            from timeutil import ensure_ist
+            try:
+                turn_now = ensure_ist(datetime.fromisoformat(now))
+            except Exception:
+                turn_now = None
+        result = await process_turn(text, eff_lang, now=turn_now)
         final_lang = result.get("language") or eff_lang
 
         # TTS for the reply

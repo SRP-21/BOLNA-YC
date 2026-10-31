@@ -630,6 +630,44 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str, user_
     return None
 
 
+def _get_task_clause(user_text: str, title: str, time_phrase: str = "") -> str:
+    """
+    Restrict context-recovery to the clause containing the task title.
+    Splits on commas, conjunctions (and, aur, और, ಮತ್ತು), and sentence punctuation.
+    """
+    if not user_text:
+        return ""
+
+    import re
+    clauses = re.split(r'[,;.!?\n]|(?:\s+(?:and|aur|और|ಮತ್ತು)\s+)', user_text, flags=re.IGNORECASE)
+    clauses = [c.strip() for c in clauses if c.strip()]
+    if len(clauses) <= 1:
+        return user_text
+
+    t_lower = title.lower().strip()
+    # 1. Exact match of full title in clause
+    for c in clauses:
+        if t_lower in c.lower():
+            return c
+
+    # 2. Match significant tokens of title (length >= 3)
+    title_words = [w for w in re.split(r'\s+', t_lower) if len(w) >= 3 and w not in {'task', 'reminder'}]
+    if title_words:
+        for c in clauses:
+            c_lower = c.lower()
+            if any(w in c_lower for w in title_words):
+                return c
+
+    # 3. Match time_phrase if present in a unique clause
+    if time_phrase:
+        tp_lower = time_phrase.lower().strip()
+        matching_tp = [c for c in clauses if tp_lower in c.lower()]
+        if len(matching_tp) == 1:
+            return matching_tp[0]
+
+    return ""
+
+
 def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Optional[datetime] = None, user_text: str = "") -> dict:
     """Create a new task from add_task or add_tasks tool call."""
     title = args.get("title", "Untitled").strip()
@@ -638,25 +676,31 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
     if recurrence in ("none", "null", "", None):
         recurrence = None
 
-    # Context enrichment from user_text if LLM truncated day/period indicators
+    # Context enrichment from user_text scoped to this task's clause
     if user_text:
-        u_lower = user_text.lower()
-        tp_lower = time_phrase.lower()
-        prefix = []
-        for ind in ["tomorrow", "kal", "naale", "कल", "ನಾಳೆ"]:
-            if ind in u_lower and ind not in tp_lower:
-                prefix.append(ind)
-                break
-        for ind in ["sanje", "shaam", "evening", "pm", "ಸಂಜೆ", "ಶಾಮ"]:
-            if ind in u_lower and ind not in tp_lower:
-                prefix.append(ind)
-                break
-        for ind in ["subah", "morning", "beligge", "am", "ಬೆಳಿಗ್ಗೆ", "सुबह"]:
-            if ind in u_lower and ind not in tp_lower:
-                prefix.append(ind)
-                break
-        if prefix:
-            time_phrase = f"{' '.join(prefix)} {time_phrase}"
+        scoped_clause = _get_task_clause(user_text, title, time_phrase)
+        if scoped_clause:
+            u_lower = scoped_clause.lower()
+            tp_lower = time_phrase.lower()
+            prefix = []
+            for ind in ["tomorrow", "kal", "naale", "कल", "ನಾಳೆ"]:
+                if ind in u_lower and ind not in tp_lower:
+                    prefix.append(ind)
+                    break
+            for ind in ["sanje", "shaam", "evening", "pm", "ಸಂಜೆ", "ಶಾಮ"]:
+                if ind in u_lower and ind not in tp_lower:
+                    prefix.append(ind)
+                    break
+            for ind in ["subah", "morning", "beligge", "am", "ಬೆಳಿಗ್ಗೆ", "सुबह"]:
+                if ind in u_lower and ind not in tp_lower:
+                    prefix.append(ind)
+                    break
+            for ind in ["today", "aaj", "आज", "indu", "ಇಂದು"]:
+                if ind in u_lower and ind not in tp_lower:
+                    prefix.append(ind)
+                    break
+            if prefix:
+                time_phrase = f"{' '.join(prefix)} {time_phrase}"
 
     # Resolve time (pass anchor_dt for chaining vague phrases after a prior task)
     resolved = resolve_time(time_phrase, now=now, anchor_dt=anchor_dt)

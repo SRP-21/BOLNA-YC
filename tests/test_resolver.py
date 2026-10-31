@@ -181,3 +181,89 @@ def test_context_enrichment_from_user_text():
     finally:
         db.close()
 
+
+def test_clause_scoping_no_cross_clause_leak_en_hi_kn():
+    """
+    Verify clause scoping in _handle_add_task prevents indicators (kal, tomorrow, etc.)
+    from leaking across clauses.
+    Standup and gym stay TODAY; only the doctor task is TOMORROW.
+    """
+    from db import init_db, SessionLocal, Task
+    from agent.planner import _handle_add_task
+
+    init_db()
+    db = SessionLocal()
+    db.query(Task).delete()
+    db.commit()
+
+    now_morning = datetime(2026, 10, 31, 8, 0, 0, tzinfo=IST)
+
+    try:
+        # 1. English: "standup at 10, kal subah doctor at 9, gym around 6"
+        u1 = "standup at 10, kal subah doctor at 9, gym around 6"
+        c_standup = _handle_add_task(db, {"title": "Standup", "time_phrase": "10"}, now=now_morning, language="en", user_text=u1)
+        c_doctor = _handle_add_task(db, {"title": "Doctor", "time_phrase": "9"}, now=now_morning, language="en", user_text=u1)
+        c_gym = _handle_add_task(db, {"title": "Gym", "time_phrase": "around 6"}, now=now_morning, language="en", user_text=u1)
+
+        t_standup = db.query(Task).filter_by(id=c_standup["task_id"]).first()
+        t_doctor = db.query(Task).filter_by(id=c_doctor["task_id"]).first()
+        t_gym = db.query(Task).filter_by(id=c_gym["task_id"]).first()
+
+        # Standup and gym must stay TODAY (day 31)
+        assert t_standup.due_at.day == 31
+        assert t_standup.due_at.hour == 10
+        assert t_gym.due_at.day == 31
+        assert t_gym.due_at.hour == 18
+
+        # Only doctor is TOMORROW (Nov 1)
+        assert t_doctor.due_at.month == 11
+        assert t_doctor.due_at.day == 1
+        assert t_doctor.due_at.hour == 9
+
+        # 2. Hindi/Hinglish: "aaj standup at 10 baje, kal doctor ka appointment 5 baje"
+        u2 = "aaj standup at 10 baje, kal doctor ka appointment 5 baje"
+        c2_standup = _handle_add_task(db, {"title": "Standup", "time_phrase": "10 baje"}, now=now_morning, language="hi", user_text=u2)
+        c2_doc = _handle_add_task(db, {"title": "Doctor appointment", "time_phrase": "5 baje"}, now=now_morning, language="hi", user_text=u2)
+
+        t2_standup = db.query(Task).filter_by(id=c2_standup["task_id"]).first()
+        t2_doc = db.query(Task).filter_by(id=c2_doc["task_id"]).first()
+
+        assert t2_standup.due_at.day == 31
+        assert t2_standup.due_at.hour == 10
+
+        assert t2_doc.due_at.month == 11
+        assert t2_doc.due_at.day == 1
+        assert t2_doc.due_at.hour == 17
+
+        # 3. Hindi with "और": "आज स्टैंडअप 10 बजे और कल डॉक्टर 9 बजे"
+        u3 = "आज स्टैंडअप 10 बजे और कल डॉक्टर 9 बजे"
+        c3_standup = _handle_add_task(db, {"title": "स्टैंडअप", "time_phrase": "10 बजे"}, now=now_morning, language="hi", user_text=u3)
+        c3_doc = _handle_add_task(db, {"title": "डॉक्टर", "time_phrase": "9 बजे"}, now=now_morning, language="hi", user_text=u3)
+
+        t3_standup = db.query(Task).filter_by(id=c3_standup["task_id"]).first()
+        t3_doc = db.query(Task).filter_by(id=c3_doc["task_id"]).first()
+
+        assert t3_standup.due_at.day == 31
+        assert t3_standup.due_at.hour == 10
+
+        assert t3_doc.due_at.month == 11
+        assert t3_doc.due_at.day == 1
+        assert t3_doc.due_at.hour == 9
+
+        # 4. Kannada with "ಮತ್ತು": "ಇಂದು ಸ್ಟ್ಯಾಂಡಪ್ 10 ಗಂಟೆಗೆ ಮತ್ತು ನಾಳೆ ಡಾಕ್ಟರ್ 9 ಗಂಟೆಗೆ"
+        u4 = "ಇಂದು ಸ್ಟ್ಯಾಂಡಪ್ 10 ಗಂಟೆಗೆ ಮತ್ತು ನಾಳೆ ಡಾಕ್ಟರ್ 9 ಗಂಟೆಗೆ"
+        c4_standup = _handle_add_task(db, {"title": "ಸ್ಟ್ಯಾಂಡಪ್", "time_phrase": "10 ಗಂಟೆಗೆ"}, now=now_morning, language="kn", user_text=u4)
+        c4_doc = _handle_add_task(db, {"title": "ಡಾಕ್ಟರ್", "time_phrase": "9 ಗಂಟೆಗೆ"}, now=now_morning, language="kn", user_text=u4)
+
+        t4_standup = db.query(Task).filter_by(id=c4_standup["task_id"]).first()
+        t4_doc = db.query(Task).filter_by(id=c4_doc["task_id"]).first()
+
+        assert t4_standup.due_at.day == 31
+        assert t4_standup.due_at.hour == 10
+
+        assert t4_doc.due_at.month == 11
+        assert t4_doc.due_at.day == 1
+        assert t4_doc.due_at.hour == 9
+    finally:
+        db.close()
+
