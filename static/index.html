@@ -432,8 +432,66 @@
       }
     }
 
+    function createTaskElement(task) {
+      const div = document.createElement('div');
+      div.className = `p-3.5 rounded-2xl border transition ${
+        task.status === 'due' ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700' :
+        task.status === 'done' ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-60' :
+        task.status === 'snoozed' ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800' :
+        'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+      }`;
+
+      const dueFormatted = task.due_at ? new Date(task.due_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unset';
+
+      div.innerHTML = `
+        <div class="flex items-start justify-between">
+          <div class="flex-1 min-w-0 pr-2">
+            <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+              <span class="font-semibold text-sm text-slate-800 dark:text-slate-100 ${task.status === 'done' ? 'line-through' : ''}">${escapeHtml(task.title)}</span>
+              ${task.needs_confirmation ? `
+                <span class="cursor-pointer group relative inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700" title="${escapeHtml(task.resolution_note || 'Ambiguous time')}">
+                  <i class="fa-solid fa-triangle-exclamation mr-1 text-[9px]"></i>Needs confirmation
+                  <div class="hidden group-hover:block absolute bottom-full left-0 mb-1 z-20 w-48 p-2 bg-slate-900 text-white text-[10px] rounded-lg shadow-lg">
+                    ${escapeHtml(task.resolution_note || 'Resolved from vague phrase')}
+                  </div>
+                </span>
+              ` : ''}
+              ${task.recurrence ? `
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">
+                  <i class="fa-solid fa-repeat mr-1 text-[8px]"></i>${escapeHtml(task.recurrence)}
+                </span>
+              ` : ''}
+            </div>
+            <div class="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400 mt-1">
+              <span><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${dueFormatted}</span>
+              <span class="capitalize text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                task.status === 'due' ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 animate-pulse' :
+                task.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' :
+                task.status === 'snoozed' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300' :
+                'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }">${task.status}</span>
+              ${task.snooze_count > 0 ? `<span class="text-[10px] text-amber-600 dark:text-amber-400">(${task.snooze_count}x snoozed)</span>` : ''}
+            </div>
+          </div>
+          <div class="flex items-center space-x-1 shrink-0">
+            ${task.status !== 'done' ? `
+            <button onclick="fireReminderNow(${task.id})" class="px-2 py-1 text-[11px] bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/40 dark:hover:bg-indigo-800/60 text-indigo-700 dark:text-indigo-300 rounded font-medium transition" title="Trigger reminder immediately for stage demo">
+              <i class="fa-solid fa-play text-[10px] mr-1"></i>Fire now
+            </button>` : ''}
+            <button onclick="deleteTask(${task.id})" class="p-1.5 text-slate-400 hover:text-rose-600 transition" title="Cancel reminder">
+              <i class="fa-solid fa-trash-can text-xs"></i>
+            </button>
+          </div>
+        </div>
+      `;
+      return div;
+    }
+
     function renderTasks(tasks) {
-      tasksCount.textContent = tasks.length;
+      const activeTasks = tasks.filter(t => t.status !== 'done');
+      const doneTasks = tasks.filter(t => t.status === 'done');
+      tasksCount.textContent = activeTasks.length;
+
       if (tasks.length === 0) {
         tasksContainer.innerHTML = '';
         tasksContainer.appendChild(tasksEmptyState);
@@ -441,59 +499,33 @@
       }
 
       tasksContainer.innerHTML = '';
-      tasks.forEach(task => {
-        const div = document.createElement('div');
-        div.className = `p-3.5 rounded-2xl border transition ${
-          task.status === 'due' ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700' :
-          task.status === 'done' ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-60' :
-          task.status === 'snoozed' ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800' :
-          'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
-        }`;
+      if (activeTasks.length === 0) {
+        const noActive = document.createElement('div');
+        noActive.className = 'text-center py-4 text-xs text-slate-400 dark:text-slate-500';
+        noActive.textContent = 'All caught up! No pending reminders.';
+        tasksContainer.appendChild(noActive);
+      } else {
+        activeTasks.forEach(task => {
+          tasksContainer.appendChild(createTaskElement(task));
+        });
+      }
 
-        const dueFormatted = task.due_at ? new Date(task.due_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unset';
-        
-        div.innerHTML = `
-          <div class="flex items-start justify-between">
-            <div class="flex-1 min-w-0 pr-2">
-              <div class="flex items-center space-x-2 flex-wrap gap-y-1">
-                <span class="font-semibold text-sm text-slate-800 dark:text-slate-100 ${task.status === 'done' ? 'line-through' : ''}">${escapeHtml(task.title)}</span>
-                ${task.needs_confirmation ? `
-                  <span class="cursor-pointer group relative inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700" title="${escapeHtml(task.resolution_note || 'Ambiguous time')}">
-                    <i class="fa-solid fa-triangle-exclamation mr-1 text-[9px]"></i>Needs confirmation
-                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-1 z-20 w-48 p-2 bg-slate-900 text-white text-[10px] rounded-lg shadow-lg">
-                      ${escapeHtml(task.resolution_note || 'Resolved from vague phrase')}
-                    </div>
-                  </span>
-                ` : ''}
-                ${task.recurrence ? `
-                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">
-                    <i class="fa-solid fa-repeat mr-1 text-[8px]"></i>${escapeHtml(task.recurrence)}
-                  </span>
-                ` : ''}
-              </div>
-              <div class="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400 mt-1">
-                <span><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${dueFormatted}</span>
-                <span class="capitalize text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                  task.status === 'due' ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 animate-pulse' :
-                  task.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' :
-                  task.status === 'snoozed' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300' :
-                  'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                }">${task.status}</span>
-                ${task.snooze_count > 0 ? `<span class="text-[10px] text-amber-600 dark:text-amber-400">(${task.snooze_count}x snoozed)</span>` : ''}
-              </div>
-            </div>
-            <div class="flex items-center space-x-1 shrink-0">
-              <button onclick="fireReminderNow(${task.id})" class="px-2 py-1 text-[11px] bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/40 dark:hover:bg-indigo-800/60 text-indigo-700 dark:text-indigo-300 rounded font-medium transition" title="Trigger reminder immediately for stage demo">
-                <i class="fa-solid fa-play text-[10px] mr-1"></i>Fire now
-              </button>
-              <button onclick="deleteTask(${task.id})" class="p-1.5 text-slate-400 hover:text-rose-600 transition" title="Cancel reminder">
-                <i class="fa-solid fa-trash-can text-xs"></i>
-              </button>
-            </div>
-          </div>
+      if (doneTasks.length > 0) {
+        const details = document.createElement('details');
+        details.className = 'mt-3 pt-2 border-t border-slate-200 dark:border-slate-800 group';
+        details.innerHTML = `
+          <summary class="cursor-pointer text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center justify-between py-1.5 px-1 hover:text-slate-700 dark:hover:text-slate-200 select-none">
+            <span>Completed (${doneTasks.length})</span>
+            <i class="fa-solid fa-chevron-down text-[10px] transition-transform group-open:rotate-180"></i>
+          </summary>
+          <div class="space-y-2 mt-2" id="completed-tasks-list"></div>
         `;
-        tasksContainer.appendChild(div);
-      });
+        const completedList = details.querySelector('#completed-tasks-list');
+        doneTasks.forEach(task => {
+          completedList.appendChild(createTaskElement(task));
+        });
+        tasksContainer.appendChild(details);
+      }
     }
 
     async function deleteTask(id) {

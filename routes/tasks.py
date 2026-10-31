@@ -27,11 +27,14 @@ router = APIRouter()
 
 
 @router.get("/api/tasks")
-async def list_tasks():
-    """List all tasks, sorted by due time."""
+async def list_tasks(include_cancelled: bool = False):
+    """List all tasks, sorted by due time. Excludes cancelled tasks by default."""
     db = SessionLocal()
     try:
-        tasks = db.query(Task).order_by(Task.due_at).all()
+        query = db.query(Task)
+        if not include_cancelled:
+            query = query.filter(Task.status != TaskStatus.CANCELLED.value)
+        tasks = query.order_by(Task.due_at).all()
         return [{
             "id": t.id,
             "title": t.title,
@@ -187,7 +190,7 @@ async def reminder_reply(
 
         elif outcome.outcome == "reschedule":
             if outcome.new_time_phrase:
-                resolved = resolve_time(outcome.new_time_phrase)
+                resolved = resolve_time(outcome.new_time_phrase, now=now_ist())
                 task.due_at = to_ist_naive(resolved.dt)
                 task.status = TaskStatus.SCHEDULED.value
                 schedule_task_reminder(task.id, resolved.dt)
