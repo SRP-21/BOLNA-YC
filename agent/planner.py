@@ -605,7 +605,7 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str, user_
         items = []
         last_resolved_dt = None  # anchor for "on the way back"-style vague phrases
         for t_args in tasks_list:
-            c = _handle_add_task(db, t_args, now, language, anchor_dt=last_resolved_dt)
+            c = _handle_add_task(db, t_args, now, language, anchor_dt=last_resolved_dt, user_text=user_text)
             if c:
                 items.append(c)
                 # Update anchor to the last successfully resolved time
@@ -618,7 +618,7 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str, user_
                         pass
         return {"type": "batch_created", "items": items}
     elif name == "add_task":
-        return _handle_add_task(db, args, now, language)
+        return _handle_add_task(db, args, now, language, user_text=user_text)
     elif name == "update_task":
         return _handle_update_task(db, args, now)
     elif name == "cancel_task":
@@ -630,13 +630,33 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str, user_
     return None
 
 
-def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Optional[datetime] = None) -> dict:
+def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Optional[datetime] = None, user_text: str = "") -> dict:
     """Create a new task from add_task or add_tasks tool call."""
     title = args.get("title", "Untitled").strip()
     time_phrase = args.get("time_phrase", "in 1 hour")
     recurrence = args.get("recurrence")
     if recurrence in ("none", "null", "", None):
         recurrence = None
+
+    # Context enrichment from user_text if LLM truncated day/period indicators
+    if user_text:
+        u_lower = user_text.lower()
+        tp_lower = time_phrase.lower()
+        prefix = []
+        for ind in ["tomorrow", "kal", "naale", "कल", "ನಾಳೆ"]:
+            if ind in u_lower and ind not in tp_lower:
+                prefix.append(ind)
+                break
+        for ind in ["sanje", "shaam", "evening", "pm", "ಸಂಜೆ", "ಶಾಮ"]:
+            if ind in u_lower and ind not in tp_lower:
+                prefix.append(ind)
+                break
+        for ind in ["subah", "morning", "beligge", "am", "ಬೆಳಿಗ್ಗೆ", "सुबह"]:
+            if ind in u_lower and ind not in tp_lower:
+                prefix.append(ind)
+                break
+        if prefix:
+            time_phrase = f"{' '.join(prefix)} {time_phrase}"
 
     # Resolve time (pass anchor_dt for chaining vague phrases after a prior task)
     resolved = resolve_time(time_phrase, now=now, anchor_dt=anchor_dt)

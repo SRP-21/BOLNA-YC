@@ -95,15 +95,15 @@ def resolve_time(
 
     # --- 2. Check for tomorrow / kal indicators ---
     is_tomorrow = False
-    tomorrow_patterns = ["tomorrow", "kal", "naale"]  # naale = Kannada for tomorrow
+    tomorrow_patterns = ["tomorrow", "kal", "naale", "कल", "ನಾಳೆ"]  # naale / ನಾಳೆ = Kannada for tomorrow
     for tp in tomorrow_patterns:
         if tp in phrase_lower:
             is_tomorrow = True
             break
 
     # Context indicators for AM/PM from surrounding words
-    has_morning = any(w in phrase_lower for w in ["subah", "morning", "beligge", "am"])
-    has_evening = any(w in phrase_lower for w in ["shaam", "evening", "sanje", "pm", "raat", "night"])
+    has_morning = any(w in phrase_lower for w in ["subah", "morning", "beligge", "am", "सुबह", "ಬೆಳಿಗ್ಗೆ"])
+    has_evening = any(w in phrase_lower for w in ["shaam", "evening", "sanje", "pm", "raat", "night", "शाम", "रात", "ಸಂಜೆ", "ರಾತ್ರಿ"])
 
     # --- 3. Exact time: digits like "10", "10:30", "10 am", "7 pm", "6 baje" ---
     # Using re.search so phrases like "tomorrow at 7 pm" or "subah 10 baje" match
