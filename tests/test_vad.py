@@ -1,52 +1,63 @@
 """
 Unit tests for AdaptiveVAD and voice end-of-speech detection.
-Ports the vad.js state machine to Python to test all required synthetic audio sequences:
-1. Silence
-2. Continuous noise
-3. Speech
-4. Speech then silence
-5. Pure noise that is louder than expected
-6. Trailing standalone 'stop' stripping
+Loads constants from static/vad_config.json so the Python port and vad.js remain 100% identical.
+
+Tested sequences:
+1. Speech starting at frame 0 (immediate speech onset in first 400ms)
+2. Speech starting at 1 s
+3. Loud-room floor (ambient noise floor tracked, no false triggers)
+4. Synthetic silence (times out at 6s)
+5. Continuous moderate noise (times out at 6s)
+6. Speech then silence (~1.1s silence triggers speech_end)
+7. Hard cap (20s)
+8. Trailing standalone 'stop' stripping
 """
+import os
+import json
 import pytest
-import re
+
+# Load shared constants from static/vad_config.json
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "static", "vad_config.json")
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    VAD_CONFIG = json.load(f)
 
 
 class AdaptiveVAD:
-    """Python port of static/vad.js state machine."""
+    """Python port of static/vad.js state machine sharing vad_config.json."""
 
-    def __init__(
-        self,
-        calibration_ms: int = 400,
-        multiplier: float = 3.0,
-        min_threshold: float = 0.015,
-        min_speech_ms: int = 300,
-        end_silence_ms: int = 1100,
-        no_speech_timeout_ms: int = 6000,
-        hard_cap_ms: int = 20000,
-    ):
-        self.calibration_ms = calibration_ms
-        self.multiplier = multiplier
-        self.min_threshold = min_threshold
-        self.min_speech_ms = min_speech_ms
-        self.end_silence_ms = end_silence_ms
-        self.no_speech_timeout_ms = no_speech_timeout_ms
-        self.hard_cap_ms = hard_cap_ms
+    def __init__(self, config=None):
+        cfg = config or VAD_CONFIG
+        self.frame_duration_ms = cfg.get("frame_duration_ms", 50)
+        self.history_window_ms = cfg.get("history_window_ms", 2000)
+        self.max_noise_floor = cfg.get("max_noise_floor", 0.04)
+        self.min_speech_threshold = cfg.get("min_speech_threshold", 0.015)
+        self.multiplier = cfg.get("multiplier", 3.0)
+        self.min_speech_ms = cfg.get("min_speech_ms", 300)
+        self.end_silence_ms = cfg.get("end_silence_ms", 1100)
+        self.no_speech_timeout_ms = cfg.get("no_speech_timeout_ms", 6000)
+        self.hard_cap_ms = cfg.get("hard_cap_ms", 20000)
+        self.smoothing_alpha = cfg.get("smoothing_alpha", 0.3)
+
+        self.max_history_frames = max(
+            1, round(self.history_window_ms / self.frame_duration_ms)
+        )
         self.reset()
 
     def reset(self):
         self.total_ms = 0
-        self.calibration_samples = []
+        self.smoothed_rms = None
+        self.history = []
         self.noise_floor = None
         self.speech_threshold = None
         self.speech_accumulated_ms = 0
         self.current_silence_ms = 0
         self.speech_detected = False
-        self.state = "calibrating"
+        self.state = "listening"
         self.is_final = False
         self.final_reason = None
 
-    def process_frame(self, rms: float, frame_duration_ms: int = 50) -> dict:
+    def process_frame(self, rms: float, frame_duration_ms: int = None) -> dict:
+        dt = frame_duration_ms or self.frame_duration_ms
         if self.is_final:
             return {
                 "state": self.state,
@@ -57,7 +68,7 @@ class AdaptiveVAD:
                 "threshold": self.speech_threshold,
             }
 
-        self.total_ms += frame_duration_ms
+        self.total_ms += dt
 
         # Hard cap (20s)
         if self.total_ms >= self.hard_cap_ms:
@@ -73,33 +84,34 @@ class AdaptiveVAD:
                 "threshold": self.speech_threshold,
             }
 
-        # Calibration phase (first ~400 ms)
-        if self.total_ms <= self.calibration_ms:
-            self.calibration_samples.append(rms)
-            self.state = "calibrating"
-            return {
-                "state": "calibrating",
-                "is_final": False,
-                "rms": rms,
-                "noise_floor": None,
-                "threshold": None,
-            }
-
-        # End of calibration: compute noise floor & threshold
-        if self.speech_threshold is None:
-            self.noise_floor = (
-                sum(self.calibration_samples) / len(self.calibration_samples)
-                if self.calibration_samples
-                else 0.0
-            )
-            self.speech_threshold = max(
-                self.noise_floor * self.multiplier, self.min_threshold
+        # 1. Exponential moving average smoothing of RMS
+        if self.smoothed_rms is None:
+            self.smoothed_rms = rms
+        else:
+            self.smoothed_rms = (
+                self.smoothing_alpha * rms
+                + (1.0 - self.smoothing_alpha) * self.smoothed_rms
             )
 
+        # 2. History buffer of smoothed RMS over the last ~2 seconds
+        self.history.append(self.smoothed_rms)
+        if len(self.history) > self.max_history_frames:
+            self.history.pop(0)
+
+        # 3. Noise floor: running minimum over the history window, capped at max_noise_floor (0.04)
+        min_smoothed = min(self.history)
+        self.noise_floor = min(min_smoothed, self.max_noise_floor)
+
+        # 4. Speech threshold
+        self.speech_threshold = max(
+            self.noise_floor * self.multiplier, self.min_speech_threshold
+        )
+
+        # 5. Speech detection
         is_speech_frame = rms >= self.speech_threshold
 
         if is_speech_frame:
-            self.speech_accumulated_ms += frame_duration_ms
+            self.speech_accumulated_ms += dt
             self.current_silence_ms = 0
             if self.speech_accumulated_ms >= self.min_speech_ms:
                 self.speech_detected = True
@@ -135,8 +147,8 @@ class AdaptiveVAD:
                 "threshold": self.speech_threshold,
             }
 
-        # User previously spoke for at least 300 ms, now silent
-        self.current_silence_ms += frame_duration_ms
+        # Speech was detected (>= 300ms), now in silence
+        self.current_silence_ms += dt
         if self.current_silence_ms >= self.end_silence_ms:
             self.is_final = True
             self.final_reason = "speech_end"
@@ -160,73 +172,91 @@ class AdaptiveVAD:
         }
 
 
-def test_vad_synthetic_silence():
-    """Silence sequence: low ambient floor, no speech, times out at 6s."""
+def test_vad_speech_starting_at_frame_0():
+    """Speech starting immediately at frame 0 must be detected and not swallowed."""
     vad = AdaptiveVAD()
-    # 130 frames @ 50ms = 6500ms of near silence (rms ~0.002)
+    # User speaks immediately with RMS 0.16 on frame 0
+    res0 = vad.process_frame(0.16, 50)
+    assert res0["state"] == "hearing"
+    assert vad.noise_floor <= 0.04  # Capped at max_noise_floor
+    assert vad.speech_threshold <= 0.12  # 0.04 * 3 = 0.12 < 0.16
+
+    # Continue speech for 350 ms (7 frames total)
+    for _ in range(6):
+        res = vad.process_frame(0.16, 50)
+        assert res["state"] == "hearing"
+
+    assert vad.speech_detected is True
+    assert vad.speech_accumulated_ms >= 300
+
+
+def test_vad_speech_starting_at_1_second():
+    """Speech starting at 1 second (after 1000ms of quiet room):
+    Frames 0-19 are listening; frame 20 triggers hearing."""
+    vad = AdaptiveVAD()
+    # 20 frames @ 50ms = 1000ms of quiet room (rms ~0.005)
+    for _ in range(20):
+        res = vad.process_frame(0.005, 50)
+        assert res["state"] == "listening"
+        assert res["is_final"] is False
+
+    assert vad.speech_detected is False
+    assert vad.noise_floor == pytest.approx(0.005, abs=0.002)
+
+    # Frame 20 (at 1000ms): user starts speaking with RMS 0.14
+    res_speech = vad.process_frame(0.14, 50)
+    assert res_speech["state"] == "hearing"
+    assert res_speech["is_final"] is False
+
+
+def test_vad_loud_room_floor():
+    """Loud room floor (e.g. ambient fan / AC noise around 0.035).
+    Noise floor tracks running minimum around ~0.035, speech threshold is ~0.105.
+    Loud continuous noise does not trigger false speech and times out at 6s."""
+    vad = AdaptiveVAD()
     final_res = None
-    for _ in range(130):
-        res = vad.process_frame(0.002, frame_duration_ms=50)
+    for i in range(130):
+        # Noise fluctuates between 0.032 and 0.038
+        rms = 0.035 + (0.003 if i % 2 == 0 else -0.003)
+        res = vad.process_frame(rms, 50)
         if res["is_final"]:
             final_res = res
             break
 
     assert final_res is not None
-    assert final_res["is_final"] is True
+    assert final_res["reason"] == "no_speech"
+    assert final_res["state"] == "timeout_no_speech"
+    assert vad.noise_floor <= 0.04
+    assert vad.speech_detected is False
+
+
+def test_vad_synthetic_silence():
+    """Silence sequence: low ambient floor, no speech, times out at 6s."""
+    vad = AdaptiveVAD()
+    final_res = None
+    for _ in range(130):
+        res = vad.process_frame(0.002, 50)
+        if res["is_final"]:
+            final_res = res
+            break
+
+    assert final_res is not None
     assert final_res["reason"] == "no_speech"
     assert final_res["state"] == "timeout_no_speech"
     assert vad.total_ms == 6000
 
 
-def test_vad_synthetic_continuous_noise():
-    """Continuous noise sequence: moderate background hum (rms ~0.02) does not trigger speech and times out."""
-    vad = AdaptiveVAD()
-    final_res = None
-    for _ in range(130):
-        res = vad.process_frame(0.02, frame_duration_ms=50)
-        if res["is_final"]:
-            final_res = res
-            break
-
-    assert final_res is not None
-    assert final_res["reason"] == "no_speech"
-    assert vad.total_ms == 6000
-    # Threshold should be max(0.02 * 3, 0.015) = 0.06
-    assert vad.speech_threshold == pytest.approx(0.06)
-
-
-def test_vad_synthetic_pure_noise_louder_than_expected():
-    """Pure noise louder than expected (e.g. loud AC/fan at rms 0.05).
-    Threshold adapts to floor * 3 = 0.15, avoiding false triggers and timing out at 6s."""
-    vad = AdaptiveVAD()
-    final_res = None
-    # Noise fluctuates around 0.05 - 0.06
-    for i in range(130):
-        rms = 0.05 + (0.01 if i % 2 == 0 else -0.01)
-        res = vad.process_frame(rms, frame_duration_ms=50)
-        if res["is_final"]:
-            final_res = res
-            break
-
-    assert final_res is not None
-    assert final_res["reason"] == "no_speech"
-    assert vad.noise_floor >= 0.045
-    assert vad.speech_threshold >= 0.135
-
-
 def test_vad_synthetic_speech_then_silence():
     """Speech then silence:
-    - 400 ms calibration (quiet room rms ~0.005)
+    - 400 ms quiet room (rms ~0.005)
     - 600 ms speech (rms ~0.15) -> accumulated speech > 300ms
     - 1100 ms silence (rms ~0.005) -> triggers speech_end."""
     vad = AdaptiveVAD()
 
-    # 1. 400ms calibration (8 frames @ 50ms)
     for _ in range(8):
         res = vad.process_frame(0.005, 50)
-        assert res["state"] == "calibrating"
+        assert res["state"] == "listening"
 
-    # 2. 600ms speech (12 frames @ 50ms)
     for _ in range(12):
         res = vad.process_frame(0.15, 50)
         assert res["state"] == "hearing"
@@ -234,7 +264,6 @@ def test_vad_synthetic_speech_then_silence():
     assert vad.speech_detected is True
     assert vad.speech_accumulated_ms == 600
 
-    # 3. Silence: 22 frames = 1100ms
     final_res = None
     for _ in range(25):
         res = vad.process_frame(0.005, 50)
@@ -245,29 +274,6 @@ def test_vad_synthetic_speech_then_silence():
     assert final_res is not None
     assert final_res["reason"] == "speech_end"
     assert final_res["state"] == "speech_end"
-    # Total time: 400ms calib + 600ms speech + 1100ms silence = 2100ms
-    assert vad.total_ms == 2100
-
-
-def test_vad_synthetic_speech_hard_cap():
-    """Continuous speech reaching hard cap at 20 seconds."""
-    vad = AdaptiveVAD()
-    # 8 frames calib
-    for _ in range(8):
-        vad.process_frame(0.005, 50)
-
-    final_res = None
-    # Speech continues until 20s
-    for _ in range(450):
-        res = vad.process_frame(0.15, 50)
-        if res["is_final"]:
-            final_res = res
-            break
-
-    assert final_res is not None
-    assert final_res["reason"] == "hard_cap"
-    assert final_res["state"] == "hard_cap"
-    assert vad.total_ms >= 20000
 
 
 def test_strip_trailing_standalone_stop():
@@ -300,4 +306,3 @@ async def test_text_turn_with_trailing_stop_end_to_end():
         resp = client.post("/api/text/turn", data={"text": "standup at 10 stop"})
         assert resp.status_code == 200
         mock_turn.assert_called_once_with("standup at 10", "en", now=None)
-

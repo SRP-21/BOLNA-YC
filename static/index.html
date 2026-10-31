@@ -91,6 +91,17 @@
         </div>
 
         <div class="flex items-center space-x-2">
+          <!-- Hands-free Mode Toggle -->
+          <button id="hands-free-btn" class="px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center space-x-1.5 transition shadow-sm" title="Toggle hands-free conversation mode">
+            <span id="hands-free-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+            <span>Hands-free: <strong id="hands-free-label">Off</strong></span>
+          </button>
+
+          <!-- Barge-in indicator / warning -->
+          <span id="barge-in-badge" class="hidden px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800" title="Echo cancellation is inactive">
+            <i class="fa-solid fa-headphones mr-1"></i>Use headphones for interrupting
+          </span>
+
           <!-- Dark Mode Toggle -->
           <button id="theme-toggle" class="p-2 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
             <i class="fa-solid fa-moon dark:hidden"></i>
@@ -433,20 +444,42 @@
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
+    let isSpeaking = false;
+    let isHandsFree = false;
+    let consecutiveNoSpeech = 0;
+    let isEchoCancellationActive = false;
     let silenceTimer = null;
     let analyserNode = null;
     let vadDetector = null;
+    let vadConfig = null;
     let vadIntervalId = null;
+    let bargeInIntervalId = null;
+    let speechRecognizer = null;
     let discardCurrentRecording = false;
     let hasHeardSpeech = false;
     let animFrameId = null;
     let activeReminderTaskId = null;
     let activeReminderAudio = null;
 
+    const STOP_WORDS = ["stop", "that's all", "that is all", "bas", "बस", "ಸಾಕು"];
+
+    function isStopWord(text) {
+      if (!text) return false;
+      const t = text.trim().toLowerCase().replace(/[.!?,]/g, '');
+      for (const sw of STOP_WORDS) {
+        if (t === sw || t.endsWith(' ' + sw)) return true;
+      }
+      return false;
+    }
+
     // --- DOM Elements ---
     const heroMicBtn = document.getElementById('hero-mic-btn');
     const heroMicIcon = document.getElementById('hero-mic-icon');
     const heroMicLabel = document.getElementById('hero-mic-label');
+    const handsFreeBtn = document.getElementById('hands-free-btn');
+    const handsFreeDot = document.getElementById('hands-free-dot');
+    const handsFreeLabel = document.getElementById('hands-free-label');
+    const bargeInBadge = document.getElementById('barge-in-badge');
     const micRipple = document.getElementById('mic-ripple');
     const micSpinner = document.getElementById('mic-spinner');
     const agentStateTitle = document.getElementById('agent-state-title');
@@ -469,6 +502,67 @@
     const modalStatusText = document.getElementById('modal-status-text');
     const audioPlayer = document.getElementById('audio-player');
     const themeToggle = document.getElementById('theme-toggle');
+
+    // Load VAD constants from static/vad_config.json
+    async function loadVadConfig() {
+      if (typeof AdaptiveVAD !== 'undefined') {
+        vadConfig = await AdaptiveVAD.loadConfig('/static/vad_config.json');
+      }
+    }
+    loadVadConfig();
+
+    // Hands-free Toggle
+    if (handsFreeBtn) {
+      handsFreeBtn.addEventListener('click', () => {
+        toggleHandsFree(!isHandsFree);
+      });
+    }
+
+    function toggleHandsFree(active) {
+      isHandsFree = active;
+      consecutiveNoSpeech = 0;
+      if (isHandsFree) {
+        handsFreeDot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+        handsFreeLabel.textContent = 'On';
+        handsFreeBtn.classList.add('border-emerald-500', 'bg-emerald-50', 'dark:bg-emerald-950/30');
+        if (!isRecording && !isSpeaking) {
+          if (!isUnlocked) unlockAudio();
+          startRecording(false);
+        }
+      } else {
+        handsFreeDot.className = 'w-2 h-2 rounded-full bg-slate-400';
+        handsFreeLabel.textContent = 'Off';
+        handsFreeBtn.classList.remove('border-emerald-500', 'bg-emerald-50', 'dark:bg-emerald-950/30');
+      }
+    }
+
+    // Client-side stop words via Web Speech Recognition (if supported)
+    function initClientSpeechRecognizer() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) return;
+      try {
+        speechRecognizer = new SR();
+        speechRecognizer.continuous = true;
+        speechRecognizer.interimResults = true;
+        speechRecognizer.onresult = (event) => {
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const transcript = event.results[i][0].transcript.trim().toLowerCase();
+            if (isStopWord(transcript)) {
+              console.log("Client stop word detected:", transcript);
+              discardCurrentRecording = true;
+              stopRecording();
+              toggleHandsFree(false);
+              speakText("Okay, going idle.");
+              setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+              break;
+            }
+          }
+        };
+      } catch (e) {
+        console.warn("SpeechRecognition not initialized", e);
+      }
+    }
+    initClientSpeechRecognizer();
 
     // --- Theme Setup ---
     if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -801,21 +895,71 @@
       if (data.tts_provider_used || data.tts_fallback !== undefined) {
         updateTTSBadge(data.tts_provider_used, data.tts_fallback);
       }
+      isSpeaking = true;
+      let playPromise = null;
+
       if (data.audio_base64) {
         // High quality edge-tts / server audio
         const audioSrc = `data:${data.audio_mime || 'audio/mpeg'};base64,${data.audio_base64}`;
         audioPlayer.src = audioSrc;
         try {
           await audioPlayer.play();
-          return new Promise(r => audioPlayer.onended = r);
+          playPromise = new Promise(r => audioPlayer.onended = r);
         } catch (e) {
           console.warn('Audio play error, falling back to browser TTS', e);
           updateTTSBadge('browser', true);
-          return speakText(data.reply_text, data.language || 'en');
+          playPromise = speakText(data.reply_text, data.language || 'en');
         }
       } else {
         // Browser speechSynthesis fallback
-        return speakText(data.reply_text, data.language || 'en');
+        playPromise = speakText(data.reply_text, data.language || 'en');
+      }
+
+      // Barge-in: if echoCancellation is active, listen for user speaking over assistant
+      if (isEchoCancellationActive) {
+        startBargeInListener();
+      }
+
+      await playPromise;
+      stopBargeInListener();
+      isSpeaking = false;
+    }
+
+    function startBargeInListener() {
+      if (!isEchoCancellationActive || !audioContext || !analyserNode) return;
+      const bData = new Float32Array(analyserNode.fftSize);
+      bargeInIntervalId = setInterval(() => {
+        if (!isSpeaking) return;
+        analyserNode.getFloatTimeDomainData(bData);
+        let sumSquares = 0;
+        for (let i = 0; i < bData.length; i++) {
+          sumSquares += bData[i] * bData[i];
+        }
+        const rms = Math.sqrt(sumSquares / bData.length);
+        if (!vadDetector) return;
+        const res = vadDetector.processFrame(rms, 50);
+        if (res.state === 'hearing') {
+          // Barge-in! Stop playback immediately and capture user speech
+          console.log('Barge-in: user interrupted playback');
+          stopBargeInListener();
+          if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+          }
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+          }
+          isSpeaking = false;
+          setAgentState('hearing', 'Hearing you...', 'Listening to what you say...');
+          startRecording(false);
+        }
+      }, 50);
+    }
+
+    function stopBargeInListener() {
+      if (bargeInIntervalId) {
+        clearInterval(bargeInIntervalId);
+        bargeInIntervalId = null;
       }
     }
 
@@ -829,7 +973,7 @@
       }
     });
 
-    async function startRecording(forReminder = false) {
+    async function startRecording(forReminder = false, forExpectsReply = false) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -843,6 +987,19 @@
         hasHeardSpeech = false;
         discardCurrentRecording = false;
 
+        // Check echo cancellation setting on track
+        const track = stream.getAudioTracks()[0];
+        const settings = track && track.getSettings ? track.getSettings() : {};
+        isEchoCancellationActive = settings.echoCancellation === true;
+
+        if (bargeInBadge) {
+          if (!isEchoCancellationActive) {
+            bargeInBadge.classList.remove('hidden');
+          } else {
+            bargeInBadge.classList.add('hidden');
+          }
+        }
+
         // Audio Context & Analyser for visualizer & adaptive VAD
         if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') await audioContext.resume();
@@ -852,17 +1009,9 @@
         analyserNode.fftSize = 256;
         source.connect(analyserNode);
 
-        // Initialize adaptive VAD
+        // Initialize adaptive VAD with loaded config
         if (typeof AdaptiveVAD !== 'undefined') {
-          vadDetector = new AdaptiveVAD({
-            calibrationMs: 400,
-            multiplier: 3.0,
-            minThreshold: 0.015,
-            minSpeechMs: 300,
-            endSilenceMs: 1100,
-            noSpeechTimeoutMs: 6000,
-            hardCapMs: 20000,
-          });
+          vadDetector = new AdaptiveVAD(vadConfig || {});
         }
 
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
@@ -894,7 +1043,7 @@
 
         mediaRecorder.start(250);
         setAgentState('listening', 'Listening...', 'Speak now. Pausing will automatically finish.');
-        startVisualizerAndSilenceDetection(forReminder);
+        startVisualizerAndSilenceDetection(forReminder, forExpectsReply);
       } catch (err) {
         console.error('Microphone error:', err);
         setAgentState('idle', 'Microphone Error', 'Check permissions or use text fallback below.');
@@ -919,11 +1068,11 @@
       if (silenceTimer) clearTimeout(silenceTimer);
     }
 
-    function startVisualizerAndSilenceDetection(forReminder) {
+    function startVisualizerAndSilenceDetection(forReminder, forExpectsReply) {
       const timeData = new Float32Array(analyserNode.fftSize);
       silenceIndicator.classList.remove('hidden');
 
-      // Use a fixed 50 ms timer instead of requestAnimationFrame so it does not throttle when tab loses focus
+      // Fixed 50 ms timer so tab backgrounding does not freeze VAD
       vadIntervalId = setInterval(() => {
         if (!isRecording) return;
         analyserNode.getFloatTimeDomainData(timeData);
@@ -958,8 +1107,25 @@
           if (res.reason === 'no_speech') {
             discardCurrentRecording = true;
             stopRecording();
-            speakText("I didn't hear anything.");
-            setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+            if (isHandsFree) {
+              consecutiveNoSpeech++;
+              if (consecutiveNoSpeech >= 2) {
+                // Two consecutive timeouts: disable hands-free and go idle quietly
+                toggleHandsFree(false);
+                setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+              } else {
+                // First timeout: quietly listen again
+                setTimeout(() => {
+                  if (!isRecording && isHandsFree) startRecording(false);
+                }, 300);
+              }
+            } else if (forExpectsReply) {
+              // "If nothing is heard in 6 s, go idle quietly."
+              setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+            } else {
+              speakText("I didn't hear anything.");
+              setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+            }
           } else {
             // speech_end or hard_cap: Show Thinking immediately when recording ends!
             setAgentState('thinking', 'Thinking...', 'Analyzing your speech with Groq Whisper & LLM...');
@@ -1005,7 +1171,25 @@
         }
 
         fetchTasks();
-        setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+
+        // Stop word check client-side
+        if (data.stopped || isStopWord(data.transcript)) {
+          toggleHandsFree(false);
+          setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+          return;
+        }
+
+        // Conversation mode auto-listening
+        if (data.expects_reply || isHandsFree) {
+          consecutiveNoSpeech = 0;
+          setTimeout(() => {
+            if (!isRecording && !isSpeaking) {
+              startRecording(false, Boolean(data.expects_reply));
+            }
+          }, 350);
+        } else {
+          setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+        }
       } catch (err) {
         console.error('Voice turn error:', err);
         setAgentState('idle', 'Error processing audio', 'Please try again or use text fallback.');
@@ -1026,10 +1210,21 @@
         activeReminderModal.classList.add('hidden');
         if (data.reply_text) {
           appendBubble('agent', data.reply_text);
+          setAgentState('speaking', 'Speaking...', data.reply_text);
           await speakAudioOrBrowser(data);
         }
         fetchTasks();
-        setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+
+        if (data.expects_reply || isHandsFree) {
+          consecutiveNoSpeech = 0;
+          setTimeout(() => {
+            if (!isRecording && !isSpeaking) {
+              startRecording(false, Boolean(data.expects_reply));
+            }
+          }, 350);
+        } else {
+          setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
+        }
       } catch (err) {
         console.error('Reminder reply error:', err);
         setAgentState('idle', 'Error processing reply', 'Tap reply buttons instead.');

@@ -1,43 +1,57 @@
 /**
- * Voice Activity Detector (VAD) with adaptive noise floor calibration.
- * Measures ambient noise floor during first ~400 ms, then detects speech
- * when RMS exceeds max(noiseFloor * 3, minThreshold).
- * 
- * State transitions:
- * - calibrating (first 400ms)
- * - listening (waiting for speech)
- * - hearing (speech >= threshold)
- * - speech_end (1.1s silence after >= 300ms speech)
- * - timeout_no_speech (no speech within 6s)
- * - hard_cap (total recording reached 20s)
+ * Voice Activity Detector (VAD) with adaptive noise floor tracking.
+ * - Noise floor is tracked as the running minimum of smoothed RMS over the last ~2 seconds,
+ *   capped at an absolute maximum (0.04), initialized from the quietest frame.
+ * - Speech onset at frame 0 or in the first 400 ms is immediately detected.
+ * - Speech threshold = max(noiseFloor * multiplier, minSpeechThreshold).
+ * - End of speech = ~1.1 s silence after at least 300 ms speech.
+ * - Times out after 6 s if no speech occurs; hard cap at 20 s.
  */
 class AdaptiveVAD {
-  constructor(options = {}) {
-    this.calibrationMs = options.calibrationMs || 400;
-    this.multiplier = options.multiplier || 3.0;
-    this.minThreshold = options.minThreshold !== undefined ? options.minThreshold : 0.015;
-    this.minSpeechMs = options.minSpeechMs || 300;
-    this.endSilenceMs = options.endSilenceMs || 1100;
-    this.noSpeechTimeoutMs = options.noSpeechTimeoutMs || 6000;
-    this.hardCapMs = options.hardCapMs || 20000;
+  constructor(config = {}) {
+    this.frameDurationMs = config.frame_duration_ms || 50;
+    this.historyWindowMs = config.history_window_ms || 2000;
+    this.maxNoiseFloor = config.max_noise_floor || 0.04;
+    this.minSpeechThreshold = config.min_speech_threshold || 0.015;
+    this.multiplier = config.multiplier || 3.0;
+    this.minSpeechMs = config.min_speech_ms || 300;
+    this.endSilenceMs = config.end_silence_ms || 1100;
+    this.noSpeechTimeoutMs = config.no_speech_timeout_ms || 6000;
+    this.hardCapMs = config.hard_cap_ms || 20000;
+    this.smoothingAlpha = config.smoothing_alpha || 0.3;
 
+    this.maxHistoryFrames = Math.max(1, Math.round(this.historyWindowMs / this.frameDurationMs));
     this.reset();
+  }
+
+  static async loadConfig(url = '/static/vad_config.json') {
+    try {
+      const resp = await fetch(url);
+      if (resp.ok) {
+        return await resp.json();
+      }
+    } catch (e) {
+      console.warn('Could not load VAD config from server, using defaults', e);
+    }
+    return {};
   }
 
   reset() {
     this.totalMs = 0;
-    this.calibrationSamples = [];
+    this.smoothedRms = null;
+    this.history = [];
     this.noiseFloor = null;
     this.speechThreshold = null;
     this.speechAccumulatedMs = 0;
     this.currentSilenceMs = 0;
     this.speechDetected = false;
-    this.state = 'calibrating';
+    this.state = 'listening';
     this.isFinal = false;
     this.finalReason = null;
   }
 
-  processFrame(rms, frameDurationMs = 50) {
+  processFrame(rms, frameDurationMs = null) {
+    const dt = frameDurationMs || this.frameDurationMs;
     if (this.isFinal) {
       return {
         state: this.state,
@@ -49,7 +63,7 @@ class AdaptiveVAD {
       };
     }
 
-    this.totalMs += frameDurationMs;
+    this.totalMs += dt;
 
     // Hard cap (20s)
     if (this.totalMs >= this.hardCapMs) {
@@ -66,30 +80,36 @@ class AdaptiveVAD {
       };
     }
 
-    // 1. Calibration phase (first ~400 ms)
-    if (this.totalMs <= this.calibrationMs) {
-      this.calibrationSamples.push(rms);
-      this.state = 'calibrating';
-      return {
-        state: 'calibrating',
-        isFinal: false,
-        rms,
-        noiseFloor: null,
-        threshold: null,
-      };
+    // 1. Exponential moving average smoothing of RMS
+    if (this.smoothedRms === null) {
+      this.smoothedRms = rms;
+    } else {
+      this.smoothedRms = this.smoothingAlpha * rms + (1.0 - this.smoothingAlpha) * this.smoothedRms;
     }
 
-    // End of calibration: compute noise floor & threshold on first frame past calibration
-    if (this.speechThreshold === null) {
-      const sum = this.calibrationSamples.reduce((a, b) => a + b, 0);
-      this.noiseFloor = this.calibrationSamples.length > 0 ? (sum / this.calibrationSamples.length) : 0;
-      this.speechThreshold = Math.max(this.noiseFloor * this.multiplier, this.minThreshold);
+    // 2. History buffer of smoothed RMS over the last ~2 seconds
+    this.history.push(this.smoothedRms);
+    if (this.history.length > this.maxHistoryFrames) {
+      this.history.shift();
     }
 
+    // 3. Noise floor: running minimum over the history window, capped at maxNoiseFloor (0.04)
+    let minSmoothed = this.history[0];
+    for (let i = 1; i < this.history.length; i++) {
+      if (this.history[i] < minSmoothed) {
+        minSmoothed = this.history[i];
+      }
+    }
+    this.noiseFloor = Math.min(minSmoothed, this.maxNoiseFloor);
+
+    // 4. Speech threshold
+    this.speechThreshold = Math.max(this.noiseFloor * this.multiplier, this.minSpeechThreshold);
+
+    // 5. Speech detection
     const isSpeechFrame = rms >= this.speechThreshold;
 
     if (isSpeechFrame) {
-      this.speechAccumulatedMs += frameDurationMs;
+      this.speechAccumulatedMs += dt;
       this.currentSilenceMs = 0;
       if (this.speechAccumulatedMs >= this.minSpeechMs) {
         this.speechDetected = true;
@@ -106,7 +126,6 @@ class AdaptiveVAD {
 
     // Below speech threshold
     if (!this.speechDetected) {
-      // No speech detected yet
       if (this.totalMs >= this.noSpeechTimeoutMs) {
         this.isFinal = true;
         this.finalReason = 'no_speech';
@@ -130,8 +149,8 @@ class AdaptiveVAD {
       };
     }
 
-    // User previously spoke for at least 300 ms, now silent
-    this.currentSilenceMs += frameDurationMs;
+    // Speech was detected (>= 300ms), now in silence
+    this.currentSilenceMs += dt;
     if (this.currentSilenceMs >= this.endSilenceMs) {
       this.isFinal = true;
       this.finalReason = 'speech_end';
@@ -146,7 +165,6 @@ class AdaptiveVAD {
       };
     }
 
-    // Brief pause during speech (less than endSilenceMs)
     this.state = 'hearing';
     return {
       state: 'hearing',

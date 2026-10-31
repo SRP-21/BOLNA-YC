@@ -1,0 +1,12 @@
+{
+  "frame_duration_ms": 50,
+  "history_window_ms": 2000,
+  "max_noise_floor": 0.04,
+  "min_speech_threshold": 0.015,
+  "multiplier": 3.0,
+  "min_speech_ms": 300,
+  "end_silence_ms": 1100,
+  "no_speech_timeout_ms": 6000,
+  "hard_cap_ms": 20000,
+  "smoothing_alpha": 0.3
+}

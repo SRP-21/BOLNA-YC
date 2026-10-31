@@ -21,6 +21,17 @@ router = APIRouter()
 STOP_TRAILING_RE = re.compile(r"(?:^|[\s,;.-]+)\bstop\b[\s.!?]*$", re.IGNORECASE)
 
 
+STOP_WORDS = {"stop", "that's all", "that is all", "bas", "बस", "ಸಾಕು"}
+
+
+def is_stop_command(text: Optional[str]) -> bool:
+    """Return True if text is a standalone stop command (e.g. for conversation mode)."""
+    if not text:
+        return False
+    norm = text.strip().lower().rstrip(".!?")
+    return norm in STOP_WORDS
+
+
 def strip_trailing_stop(text: Optional[str]) -> str:
     """Strip a trailing standalone 'stop' from transcript before planning."""
     if not text:
@@ -98,6 +109,26 @@ async def voice_turn(
 
         user_text = strip_trailing_stop(stt_result.text)
         detected_language = stt_result.language
+        eff_lang = detected_language or "en"
+
+        # Client-side / server stop words for hands-free conversation mode
+        if is_stop_command(user_text) or is_stop_command(stt_result.text):
+            stop_reply = "Okay, going idle."
+            tts_res = await registry.synthesize(stop_reply, eff_lang)
+            resp = {
+                "transcript": user_text,
+                "reply_text": stop_reply,
+                "task_changes": [],
+                "language": eff_lang,
+                "tts_fallback": tts_res.use_browser_tts,
+                "tts_provider_used": tts_res.provider,
+                "expects_reply": False,
+                "stopped": True,
+            }
+            if not tts_res.use_browser_tts and tts_res.audio_bytes:
+                resp["audio_base64"] = base64.b64encode(tts_res.audio_bytes).decode()
+                resp["audio_mime"] = tts_res.mime_type
+            return JSONResponse(content=resp)
 
         # Treat empty or hint-echoed transcripts as unclear
         if not user_text.strip() or is_hint_echo(user_text, prompt_hint):
@@ -108,10 +139,10 @@ async def voice_turn(
                 "tts_provider_used": "browser",
                 "task_changes": [],
                 "language": detected_language,
+                "expects_reply": False,
             })
 
         # Agent
-        eff_lang = detected_language or "en"
         result = await process_turn(user_text, eff_lang)
         final_lang = result.get("language") or eff_lang
 
@@ -120,6 +151,15 @@ async def voice_turn(
             result["reply_text"], final_lang
         )
 
+        from agent.pending_action import get_pending_action
+        from agent.pending_choice import get_pending_choice
+        has_pending = (
+            get_pending_action() is not None
+            or get_pending_choice() is not None
+            or bool(result.get("replan_preview"))
+        )
+        expects_reply = bool(has_pending)
+
         response = {
             "transcript": user_text,
             "reply_text": result["reply_text"],
@@ -127,6 +167,7 @@ async def voice_turn(
             "language": final_lang,
             "tts_fallback": tts_result.use_browser_tts,
             "tts_provider_used": tts_result.provider,
+            "expects_reply": expects_reply,
         }
 
         if not tts_result.use_browser_tts and tts_result.audio_bytes:
@@ -155,6 +196,27 @@ async def text_turn(
     """
     try:
         from agent.lang import detect_language
+        eff_lang = language if (language and language != "en") else detect_language(text, fallback="en")
+
+        if is_stop_command(text):
+            stop_reply = "Okay, going idle."
+            tts_res = await registry.synthesize(stop_reply, eff_lang)
+            resp = {
+                "transcript": text,
+                "reply_text": stop_reply,
+                "task_changes": [],
+                "language": eff_lang,
+                "tts_fallback": tts_res.use_browser_tts,
+                "tts_provider_used": tts_res.provider,
+                "expects_reply": False,
+                "stopped": True,
+                "input_mode": "text",
+            }
+            if not tts_res.use_browser_tts and tts_res.audio_bytes:
+                resp["audio_base64"] = base64.b64encode(tts_res.audio_bytes).decode()
+                resp["audio_mime"] = tts_res.mime_type
+            return JSONResponse(content=resp)
+
         cleaned_text = strip_trailing_stop(text)
         if not cleaned_text.strip():
             return JSONResponse(content={
@@ -164,6 +226,8 @@ async def text_turn(
                 "tts_provider_used": "browser",
                 "task_changes": [],
                 "language": language or "en",
+                "expects_reply": False,
+                "input_mode": "text",
             })
         eff_lang = language if (language and language != "en") else detect_language(cleaned_text, fallback="en")
         turn_now = None
@@ -182,6 +246,15 @@ async def text_turn(
             result["reply_text"], final_lang
         )
 
+        from agent.pending_action import get_pending_action
+        from agent.pending_choice import get_pending_choice
+        has_pending = (
+            get_pending_action(now=turn_now) is not None
+            or get_pending_choice(now=turn_now) is not None
+            or bool(result.get("replan_preview"))
+        )
+        expects_reply = bool(has_pending)
+
         response = {
             "transcript": text,
             "reply_text": result["reply_text"],
@@ -190,6 +263,7 @@ async def text_turn(
             "tts_fallback": tts_result.use_browser_tts,
             "tts_provider_used": tts_result.provider,
             "input_mode": "text",
+            "expects_reply": expects_reply,
         }
 
         if not tts_result.use_browser_tts and tts_result.audio_bytes:

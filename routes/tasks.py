@@ -187,6 +187,7 @@ async def reminder_reply(
                 "language": reply_lang,
                 "tts_fallback": tts_result.use_browser_tts,
                 "tts_provider_used": tts_result.provider,
+                "expects_reply": False,
             }
             if not tts_result.use_browser_tts and tts_result.audio_bytes:
                 response["audio_base64"] = base64.b64encode(tts_result.audio_bytes).decode()
@@ -204,6 +205,7 @@ async def reminder_reply(
                 "language": reply_lang,
                 "tts_fallback": tts_result.use_browser_tts,
                 "tts_provider_used": tts_result.provider,
+                "expects_reply": False,
             }
             if not tts_result.use_browser_tts and tts_result.audio_bytes:
                 response["audio_base64"] = base64.b64encode(tts_result.audio_bytes).decode()
@@ -279,6 +281,15 @@ async def reminder_reply(
 
         # TTS for the reply
         tts_result = await registry.synthesize(reply_message, reply_lang)
+        from agent.pending_action import get_pending_action
+        from agent.pending_choice import get_pending_choice
+        has_pending = (
+            get_pending_action() is not None
+            or get_pending_choice() is not None
+            or outcome.outcome == "no_response"
+        )
+        expects_reply = bool(has_pending)
+
         response = {
             "outcome": outcome.outcome,
             "reply_text": reply_message,
@@ -286,6 +297,7 @@ async def reminder_reply(
             "language": reply_lang,
             "tts_fallback": tts_result.use_browser_tts,
             "tts_provider_used": tts_result.provider,
+            "expects_reply": expects_reply,
         }
         if not tts_result.use_browser_tts and tts_result.audio_bytes:
             response["audio_base64"] = base64.b64encode(tts_result.audio_bytes).decode()

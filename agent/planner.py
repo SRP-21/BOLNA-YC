@@ -769,8 +769,8 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
             "type": "past_time_confirmation",
             "title": title,
             "language": language,
-            "past_dt": resolved.dt,
-            "tomorrow_dt": resolved.dt + timedelta(days=1),
+            "past_dt": resolved.dt.isoformat(),
+            "tomorrow_dt": (resolved.dt + timedelta(days=1)).isoformat(),
         }
 
     # Categorize task
@@ -1109,13 +1109,17 @@ def _generate_confirmation(task_changes: list, language: str, now: Optional[date
         from agent.pending_action import set_pending_action, PendingAction
         from agent.replies import format_past_time_confirm
         pc = past_confirms[0]
+        target_dt = pc["tomorrow_dt"]
+        if isinstance(target_dt, str):
+            from datetime import datetime
+            target_dt = datetime.fromisoformat(target_dt)
         set_pending_action(PendingAction(
             action="move_to_tomorrow",
             task_id=0,
             title=pc["title"],
             language=language,
             created_at=now if now is not None else now_ist(),
-            target_dt=pc["tomorrow_dt"],
+            target_dt=target_dt,
         ))
         return format_past_time_confirm(language)
 
