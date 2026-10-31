@@ -331,41 +331,61 @@ async def process_turn(
                 log_event("agent_reply", reply_text)
                 return {"reply_text": reply_text, "task_changes": [], "language": language}
 
-        # Check if user requested replan ("push everything by 45 min", "free after 5", "swap invoice and groceries", etc.)
-        replan_intent = await extract_replan_intent(user_text, now)
-        if replan_intent:
-            plan = compute_replan(db, replan_intent, now=now, language=language)
-            set_pending_plan(plan)
-            reply_text = plan.summary.get(language, plan.summary.get("en", "I'll update your schedule. Okay?"))
-            agent_utt = Utterance(role="assistant", text=reply_text, language=language)
-            db.add(agent_utt)
-            db.commit()
-            log_event("agent_reply", reply_text)
-            return {
-                "reply_text": reply_text,
-                "task_changes": [c.to_dict() for c in plan.changes],
-                "replan_preview": plan.to_dict(),
-                "language": language,
-            }
-
-        # FIX D: Deterministic ambiguity check before LLM acts
+        # FIX D: Deterministic ambiguity check before LLM acts or replan
+        import re
         from agent.matcher import find_task_by_title
         from agent.replies import format_ambiguous
-        text_lower = user_text.lower().strip()
-        action_triggers = [
-            "cancel", "remove", "delete", "drop", "hata do", "hatao", "hata de",
-            "radd karo", "raddu madi", "snooze", "update", "move", "badal do",
-            "shift", "postpone", "aage badhao", "talli haaki"
+
+        AMBIGUITY_ACTION_TRIGGERS = [
+            # cancel
+            "cancel", "remove", "delete", "drop", "scrap", "get rid of",
+            "hata do", "hatao", "hata de", "hata", "radd karo", "radd",
+            "हटा दो", "हटाओ", "हटा देना", "हटा", "रद्द करो", "रद्द", "कैंसिल",
+            "raddu madi", "raddu", "tegeduhaku", "tegedu", "ರದ್ದು ಮಾಡು", "ರದ್ದು ಮಾಡಿ", "ರದ್ದು", "ತೆಗೆದುಹಾಕು", "ತೆಗೆ",
+            # done / ho gaya
+            "mark done", "done", "finished", "complete", "completed", "finish",
+            "ho gaya", "ho gayi", "khatam", "pura ho gaya", "kar diya", "ho chuka",
+            "हो गया", "हो गई", "पूरा हो गया", "खत्म", "कर दिया",
+            "mugiyithu", "aayithu", "aagide", "mugi", "ಮುಗಿಯಿತು", "ಆಯಿತು", "ಮುಗಿದಿದೆ", "ಪೂರ್ಣವಾಯಿತು",
+            # snooze
+            "snooze karo", "snooze", "स्नूज़ करो", "स्नूज़", "ಸ್ನೂಜ್ ಮಾಡಿ", "ಸ್ನೂಜ್",
+            # move / update
+            "reschedule", "postpone", "update", "move", "shift", "push",
+            "badal do", "badlo", "aage badhao", "aage badha do",
+            "बदल दो", "बदलो", "आगे बढ़ाओ", "आगे बढ़ा दो", "टालो", "शिफ्ट",
+            "badalisu", "munde haku", "talli haaki", "mundoodu",
+            "ಬದಲಾಯಿಸು", "ಮುಂದೂಡು", "ಮುಂದೆ ಹಾಕು", "ತಳ್ಳಿ ಹಾಕು"
         ]
+        AMBIGUITY_ACTION_TRIGGERS.sort(key=len, reverse=True)
+
+        PARTICLES_TO_CLEAN = {
+            "the", "my", "please", "ko", "ka", "ki", "bhi", "karo", "kar do", "dijiye",
+            "kar", "दो", "करो", "कर", "दीजिए", "को", "का", "की", "भी",
+            "madi", "madu", "haku", "annu", "vannu",
+            "ಅನ್ನು", "ವನ್ನು", "ಗೆ", "ಕ್ಕೆ", "ಮಾಡೀ", "ಮಾಡು", "ಮಾಡಿ"
+        }
+
+        text_lower = user_text.lower().strip()
         found_action = None
-        for act in action_triggers:
-            if act in text_lower:
-                found_action = act
+        for a in AMBIGUITY_ACTION_TRIGGERS:
+            if a in text_lower:
+                found_action = a
                 break
+
         if found_action:
-            target = text_lower.split(found_action, 1)[1].replace("the", "").replace("my", "").replace("karo", "").strip()
-            if not target:
-                target = text_lower.split(found_action, 1)[0].replace("the", "").replace("my", "").strip()
+            parts = text_lower.split(found_action, 1)
+
+            def _clean_side(s: str) -> str:
+                s = re.sub(r'\b(?:to|at|by)\s+\d+.*', '', s).strip()
+                s = re.sub(r'\b\d+\s*(?:am|pm|baje|ghante|ಗಂಟೆಗೆ).*', '', s).strip()
+                words = s.split()
+                clean_words = [w for w in words if w not in PARTICLES_TO_CLEAN]
+                return " ".join(clean_words).strip()
+
+            before = _clean_side(parts[0])
+            after = _clean_side(parts[1])
+            target = after or before
+
             if target:
                 active_tasks = db.query(Task).filter(
                     Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
@@ -382,6 +402,23 @@ async def process_turn(
                         "task_changes": [{"type": "ambiguous", "candidates": candidates}],
                         "language": language,
                     }
+
+        # Check if user requested replan ("push everything by 45 min", "free after 5", "swap invoice and groceries", etc.)
+        replan_intent = await extract_replan_intent(user_text, now)
+        if replan_intent:
+            plan = compute_replan(db, replan_intent, now=now, language=language)
+            set_pending_plan(plan)
+            reply_text = plan.summary.get(language, plan.summary.get("en", "I'll update your schedule. Okay?"))
+            agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+            db.add(agent_utt)
+            db.commit()
+            log_event("agent_reply", reply_text)
+            return {
+                "reply_text": reply_text,
+                "task_changes": [c.to_dict() for c in plan.changes],
+                "replan_preview": plan.to_dict(),
+                "language": language,
+            }
 
         # Build messages
         context = _get_context(db, now)

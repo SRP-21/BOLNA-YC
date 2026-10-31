@@ -138,6 +138,23 @@ def test_reminder_prompt_grammar_singular_plural():
     prompt_130pm = format_reminder_prompt("Lunch", dt_130pm, language="hi")
     assert prompt_130pm == "Lunch — दोपहर डेढ़ बज गया है। क्या यह पूरा हो गया, स्नूज़ करना है, या कल के लिए टालें?"
 
+    dt_1315 = datetime(2026, 10, 31, 13, 15, 0, tzinfo=IST)
+    prompt_1315 = format_reminder_prompt("Doctor", dt_1315, language="hi")
+    assert prompt_1315 == "Doctor — दोपहर सवा 1 बज गया है। क्या यह पूरा हो गया, स्नूज़ करना है, या कल के लिए टालें?"
+
+    dt_1245 = datetime(2026, 10, 31, 12, 45, 0, tzinfo=IST)
+    prompt_1245 = format_reminder_prompt("Lunch", dt_1245, language="hi")
+    assert prompt_1245 == "Lunch — दोपहर पौने एक बज गया है। क्या यह पूरा हो गया, स्नूज़ करना है, या कल के लिए टालें?"
+
+    # Odd-minute prompts joining "बजकर <M> मिनट" with "हो गए हैं"
+    dt_910am = datetime(2026, 10, 31, 9, 10, 0, tzinfo=IST)
+    prompt_910am = format_reminder_prompt("Standup", dt_910am, language="hi")
+    assert prompt_910am == "Standup — सुबह 9 बजकर 10 मिनट हो गए हैं। क्या यह पूरा हो गया, स्नूज़ करना है, या कल के लिए टालें?"
+
+    dt_605pm = datetime(2026, 10, 31, 18, 5, 0, tzinfo=IST)
+    prompt_605pm = format_reminder_prompt("Gym", dt_605pm, language="hi")
+    assert prompt_605pm == "Gym — शाम 6 बजकर 5 मिनट हो गए हैं। क्या यह पूरा हो गया, स्नूज़ करना है, या कल के लिए टालें?"
+
     # Other hours plural
     prompt_230pm = format_reminder_prompt("Meeting", dt_230pm, language="hi")
     assert prompt_230pm == "Meeting — दोपहर ढाई बज गए हैं। क्या यह पूरा हो गया, स्नूज़ करना है, या कल के लिए टालें?"

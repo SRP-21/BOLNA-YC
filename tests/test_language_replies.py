@@ -151,7 +151,7 @@ def test_reminder_fired_prompt_uses_task_stored_language():
     with patch("routes.tasks.log_event") as mock_log:
         client.post(f"/api/tasks/{hi_id}/fire-now")
         assert mock_log.call_args[0][0] == "reminder_fired"
-        assert "बज गए हैं" in mock_log.call_args[0][1]
+        assert any(phrase in mock_log.call_args[0][1] for phrase in ("बज गए हैं", "हो गए हैं", "बज गया है"))
 
         client.post(f"/api/tasks/{kn_id}/fire-now")
         assert "ಸಮಯ" in mock_log.call_args[0][1]

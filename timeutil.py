@@ -186,9 +186,10 @@ def format_time_for_reminder(dt_or_str, language: str = "en") -> str:
         # Determine phrase and whether it refers to hour 1 (singular)
         is_singular = (h == 1 and m != 45) or (h == 12 and m == 45)
 
-        verb = "बज गया है" if is_singular else "बज गए हैं"
         if m == 0:
             time_part = f"{period} {h}"
+            verb = "बज गया है" if is_singular else "बज गए हैं"
+            return f"{time_part} {verb}"
         elif m == 30:
             if h == 1:
                 time_part = f"{period} डेढ़"
@@ -196,16 +197,21 @@ def format_time_for_reminder(dt_or_str, language: str = "en") -> str:
                 time_part = f"{period} ढाई"
             else:
                 time_part = f"{period} साढ़े {h}"
+            verb = "बज गया है" if is_singular else "बज गए हैं"
+            return f"{time_part} {verb}"
         elif m == 15:
             time_part = f"{period} सवा {h}"
+            verb = "बज गया है" if is_singular else "बज गए हैं"
+            return f"{time_part} {verb}"
         elif m == 45:
             next_h = 1 if h == 12 else (h + 1)
             next_h_str = "एक" if next_h == 1 else str(next_h)
             time_part = f"{period} पौने {next_h_str}"
+            verb = "बज गया है" if is_singular else "बज गए हैं"
+            return f"{time_part} {verb}"
         else:
-            time_part = f"{period} {h} बजकर {m} मिनट"
-
-        return f"{time_part} {verb}"
+            # Odd/general minutes: 'बजकर <M> मिनट' joins with 'हो गए हैं'
+            return f"{period} {h} बजकर {m} मिनट हो गए हैं"
 
     elif language == "kn":
         period = get_period_of_day(dt.hour, language="kn")
