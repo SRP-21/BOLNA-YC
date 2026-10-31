@@ -380,9 +380,28 @@ async def process_turn(
             return {"reply_text": reply_text, "task_changes": [], "language": language}
 
         # If neither pending_act nor pending_plan exists:
-        # Expired or missing state: a bare "yes" / "okay" / "ठीक है" / "ಆಯಿತು" gets a short reply and changes nothing
+        # A bare acknowledgment ("okay", "ठीक है", "ಆಯಿತು") gets a plain "Okay." in the user's language.
+        # A bare "yes" gets "Yes to what? I don't have a pending question."
+        # Both guarantee nothing in the schedule is changed.
         if not pending_act and not pending_plan:
-            if is_yes:
+            ACK_WORDS = {
+                "ok", "okay", "theek hai", "thik hai", "chalega", "sahi hai",
+                "achha", "acha", "sari", "agide", "aaytu", "aayithu",
+                "ठीक है", "अच्छा", "ಆಯಿತು", "ಸರಿ"
+            }
+            if text_clean in ACK_WORDS:
+                if language == "hi":
+                    reply_text = "ठीक है।"
+                elif language == "kn":
+                    reply_text = "ಸರಿ."
+                else:
+                    reply_text = "Okay."
+                agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+                db.add(agent_utt)
+                db.commit()
+                log_event("agent_reply", reply_text)
+                return {"reply_text": reply_text, "task_changes": [], "language": language}
+            elif is_yes:
                 from agent.replies import format_yes_to_what_no_pending
                 reply_text = format_yes_to_what_no_pending(language)
                 agent_utt = Utterance(role="assistant", text=reply_text, language=language)

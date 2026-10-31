@@ -165,20 +165,24 @@ async def test_ambiguity_unrelated_utterance_clears_choice():
 
 @pytest.mark.asyncio
 async def test_bare_affirmative_no_pending_question_never_marks_done():
-    """A bare 'okay' / 'ಆಯಿತು' / 'ठीक है' with no pending question must not mark any task done."""
+    """A bare acknowledgment ('okay' / 'ಆಯಿತು' / 'ठीक है') gets a plain 'Okay.' and does not mark tasks done."""
     id1, id2 = _setup_gym_tasks()
 
     # 1. English "okay"
     res_en = await process_turn("okay", language="en", now=FROZEN_NOW)
-    assert "Yes to what? I don't have a pending question." in res_en["reply_text"]
+    assert res_en["reply_text"] == "Okay."
 
     # 2. Hindi "ठीक है"
     res_hi = await process_turn("ठीक है", language="hi", now=FROZEN_NOW)
-    assert "किसके लिए हाँ? मेरे पास कोई लंबित सवाल नहीं है।" in res_hi["reply_text"]
+    assert res_hi["reply_text"] == "ठीक है।"
 
     # 3. Kannada "ಆಯಿತು"
     res_kn = await process_turn("ಆಯಿತು", language="kn", now=FROZEN_NOW)
-    assert "ಯಾವುದಕ್ಕೆ ಹೌದು? ನನ್ನ ಬಳಿ ಯಾವುದೇ ಬಾಕಿ ಉಳಿದ ಪ್ರಶ್ನೆ ಇಲ್ಲ." in res_kn["reply_text"]
+    assert res_kn["reply_text"] == "ಸರಿ."
+
+    # 4. Bare "yes"
+    res_yes = await process_turn("yes", language="en", now=FROZEN_NOW)
+    assert "Yes to what? I don't have a pending question." in res_yes["reply_text"]
 
     # Check tasks: STILL scheduled!
     db = SessionLocal()
