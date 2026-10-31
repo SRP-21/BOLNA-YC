@@ -25,6 +25,7 @@ REPLIES = {
         "yes_to_what_no_pending": "Yes to what? I don't have a pending question.",
         "ambiguous_which": "Which one did you mean: {candidates}?",
         "already_done": "{title} is already marked as done.",
+        "past_time_confirm": "That time has passed. Should I move it to tomorrow?",
         "question_help": "I can set, move, snooze or cancel reminders. What would you like to do?",
         "fallback_not_caught": "I didn't catch a task or time in that. Try something like 'dentist at 5 pm tomorrow'.",
         "needs_confirmation": "I've set {title} for {time}. Please confirm if that works.",
@@ -49,6 +50,7 @@ REPLIES = {
         "yes_to_what_no_pending": "किसके लिए हाँ? मेरे पास कोई लंबित सवाल नहीं है।",
         "ambiguous_which": "आपका कौन सा मतलब था: {candidates}?",
         "already_done": "{title} पहले ही पूरा हो चुका है।",
+        "past_time_confirm": "वह समय बीत चुका है। क्या मैं इसे कल के लिए रख दूं?",
         "question_help": "मैं रिमाइंडर सेट, आगे बढ़ा, स्नूज़ या रद्द कर सकता हूँ। आप क्या करना चाहते हैं?",
         "fallback_not_caught": "मुझे इसमें कोई कार्य या समय नहीं मिला। जैसे कहें: 'कल शाम 5 बजे डेंटिस्ट'।",
         "needs_confirmation": "मैंने {title} {time} सेट किया है। कृपया पुष्टि करें कि क्या यह समय सही है।",
@@ -73,6 +75,7 @@ REPLIES = {
         "yes_to_what_no_pending": "ಯಾವುದಕ್ಕೆ ಹೌದು? ನನ್ನ ಬಳಿ ಯಾವುದೇ ಬಾಕಿ ಉಳಿದ ಪ್ರಶ್ನೆ ಇಲ್ಲ.",
         "ambiguous_which": "ನಿಮ್ಮ ಉದ್ದೇಶ ಯಾವುದು: {candidates}?",
         "already_done": "{title} ಈಗಾಗಲೇ ಮುಕ್ತಾಯಗೊಂಡಿದೆ.",
+        "past_time_confirm": "ಆ ಸಮಯ ಈಗಾಗಲೇ ಮುಗಿದಿದೆ. ನಾನು ಅದನ್ನು ನಾಳೆಗೆ ಬದಲಾಯಿಸಬೇಕೆ?",
         "question_help": "ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಬಹುದು, ಮುಂದೂಡಬಹುದು, ಸ್ನೂಜ್ ಮಾಡಬಹುದು ಅಥವಾ ರದ್ದುಗೊಳಿಸಬಹುದು. ನೀವು ಏನು ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
         "fallback_not_caught": "ಅದರಲ್ಲಿ ನನಗೆ ಯಾವುದೇ ಕಾರ್ಯ ಅಥವಾ ಸಮಯ ಕಂಡುಬಂದಿಲ್ಲ. ಉದಾಹರಣೆಗೆ 'ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ ದಂತವೈದ್ಯರ ಭೇಟಿ' ಎಂದು ಹೇಳಿ ನೋಡಿ.",
         "needs_confirmation": "ನಾನು {title} ಅನ್ನು {time} ಹೊಂದಿಸಿದ್ದೇನೆ. ಇದು ಸರಿಹೊಂದುತ್ತದೆಯೇ ಎಂದು ದೃಢೀಕರಿಸಿ.",
@@ -87,11 +90,15 @@ def get_template(category: str, language: str = "en") -> str:
     return lang_dict.get(category, REPLIES["en"][category])
 
 
-def _is_unparseable_guess(change: dict) -> bool:
+def _is_unparseable_guess(change: dict, language: str = "en") -> bool:
     """Return True only for fallback guesses where the phrase couldn't be parsed at all.
-    This excludes vague-phrase hits (e.g. 'before lunch') and AM/PM guesses ('6' -> 18:00).
+    For hi and kn batch replies, also returns True for guessed bare hours (e.g. 'gym around 6').
     """
     note = change.get("resolution_note") or ""
+    if language in ("hi", "kn"):
+        if change.get("needs_confirmation"):
+            return True
+        return note.startswith("Could not parse") or "Guessed" in note
     return note.startswith("Could not parse")
 
 
@@ -151,7 +158,7 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
 
     # Append a short spoken note for any unparseable-phrase guesses in the batch
     all_items = created + updated
-    guess_items = [c for c in all_items if _is_unparseable_guess(c)]
+    guess_items = [c for c in all_items if _is_unparseable_guess(c, language)]
     if guess_items:
         guess_notes = []
         for c in guess_items:
@@ -159,7 +166,7 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
             if language == "hi":
                 guess_notes.append(f"{c['title']} का समय मुझे पता नहीं था, {when_str} लगाया।")
             elif language == "kn":
-                guess_notes.append(f"{c['title']} ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ {when_str} ಹೊಂದಿಸಿದ್ದೇನೆ।")
+                guess_notes.append(f"{c['title']} ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ {when_str} ಹೊಂದಿಸಿದ್ದೇನೆ.")
             else:
                 guess_notes.append(f"{c['title']} was a guess — I set it for {when_str}.")
         if language == "hi":
@@ -249,6 +256,10 @@ def format_cancel_aborted_leave(title: str, language: str = "en") -> str:
 
 def format_yes_to_what_no_pending(language: str = "en") -> str:
     return get_template("yes_to_what_no_pending", language)
+
+
+def format_past_time_confirm(language: str = "en") -> str:
+    return get_template("past_time_confirm", language)
 
 
 def format_question_help(language: str = "en") -> str:

@@ -311,7 +311,58 @@ async def process_turn(
 
         if pending_act:
             resp_lang = language if language != "en" else (pending_act.language or "en")
-            if is_yes:
+            if pending_act.action == "move_to_tomorrow":
+                if is_yes:
+                    from timeutil import to_ist_naive, format_time_spoken
+                    from scheduler import schedule_task_reminder
+                    new_task = Task(
+                        title=pending_act.title,
+                        due_at=to_ist_naive(pending_act.target_dt),
+                        status=TaskStatus.SCHEDULED.value,
+                        language=resp_lang,
+                        is_fixed=True,
+                    )
+                    db.add(new_task)
+                    db.commit()
+                    db.refresh(new_task)
+                    schedule_task_reminder(new_task.id, pending_act.target_dt)
+                    clear_pending_action()
+
+                    time_str = format_time_spoken(pending_act.target_dt, resp_lang)
+                    if resp_lang == "hi":
+                        reply_text = f"ठीक है, {pending_act.title} का रिमाइंडर कल {time_str} सेट कर दिया गया है।"
+                    elif resp_lang == "kn":
+                        reply_text = f"ಸರಿ, {pending_act.title} ರಿಮೈಂಡರ್ ಅನ್ನು ನಾಳೆ {time_str} ಹೊಂದಿಸಲಾಗಿದೆ."
+                    else:
+                        reply_text = f"Got it, reminder set: {pending_act.title} for tomorrow at {time_str}."
+
+                    agent_utt = Utterance(role="assistant", text=reply_text, language=resp_lang)
+                    db.add(agent_utt)
+                    db.commit()
+                    log_event("agent_reply", reply_text)
+                    return {
+                        "reply_text": reply_text,
+                        "task_changes": [{"type": "created", "task_id": new_task.id, "title": new_task.title, "due_at": pending_act.target_dt.isoformat()}],
+                        "language": resp_lang
+                    }
+                elif is_no:
+                    clear_pending_action()
+                    if resp_lang == "hi":
+                        reply_text = "ठीक है, मैं इसे शेड्यूल नहीं करूँगा।"
+                    elif resp_lang == "kn":
+                        reply_text = "ಸರಿ, ನಾನು ಅದನ್ನು ನಿಗದಿಪಡಿಸುವುದಿಲ್ಲ."
+                    else:
+                        reply_text = "Okay, I won't schedule it."
+
+                    agent_utt = Utterance(role="assistant", text=reply_text, language=resp_lang)
+                    db.add(agent_utt)
+                    db.commit()
+                    log_event("agent_reply", reply_text)
+                    return {"reply_text": reply_text, "task_changes": [], "language": resp_lang}
+                else:
+                    clear_pending_action()
+
+            elif is_yes:
                 # Re-check task in DB
                 task = db.query(Task).filter_by(id=pending_act.task_id).first()
                 if not task or task.status not in (TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value):
@@ -705,6 +756,23 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
     # Resolve time (pass anchor_dt for chaining vague phrases after a prior task)
     resolved = resolve_time(time_phrase, now=now, anchor_dt=anchor_dt)
 
+    # Check if time was explicitly marked for today but has already passed
+    is_explicit_today = any(w in time_phrase.lower() for w in ["today", "aaj", "आज", "indu", "ಇಂದು"])
+    if not is_explicit_today and user_text:
+        scoped = _get_task_clause(user_text, title, time_phrase)
+        if scoped:
+            is_explicit_today = any(w in scoped.lower() for w in ["today", "aaj", "आज", "indu", "ಇಂದು"])
+
+    if is_explicit_today and resolved.dt <= now:
+        from datetime import timedelta
+        return {
+            "type": "past_time_confirmation",
+            "title": title,
+            "language": language,
+            "past_dt": resolved.dt,
+            "tomorrow_dt": resolved.dt + timedelta(days=1),
+        }
+
     # Categorize task
     category = args.get("category")
     if not category:
@@ -1034,6 +1102,22 @@ def _generate_confirmation(task_changes: list, language: str, now: Optional[date
     )
     if not task_changes:
         return format_fallback(language)
+
+    # Check for past-time confirmation ("That time has passed. Should I move it to tomorrow?")
+    past_confirms = [c for c in task_changes if c.get("type") == "past_time_confirmation"]
+    if past_confirms:
+        from agent.pending_action import set_pending_action, PendingAction
+        from agent.replies import format_past_time_confirm
+        pc = past_confirms[0]
+        set_pending_action(PendingAction(
+            action="move_to_tomorrow",
+            task_id=0,
+            title=pc["title"],
+            language=language,
+            created_at=now if now is not None else now_ist(),
+            target_dt=pc["tomorrow_dt"],
+        ))
+        return format_past_time_confirm(language)
 
     # Check for confirmation prompt ("Should I cancel <title>?")
     confirm_prompts = [c for c in task_changes if c.get("type") == "destructive_confirm_prompt"]

@@ -9,11 +9,12 @@ from timeutil import ensure_ist, now_ist
 
 @dataclass
 class PendingAction:
-    action: str  # e.g. "cancel"
+    action: str  # e.g. "cancel" or "move_to_tomorrow"
     task_id: int
     title: str
     language: str
     created_at: datetime  # IST aware datetime
+    target_dt: Optional[datetime] = None
 
 
 _current_pending_action: Optional[PendingAction] = None

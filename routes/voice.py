@@ -11,6 +11,7 @@ from typing import Optional
 from agent.planner import process_turn
 from providers.registry import registry
 from db import SessionLocal, Task, TaskStatus
+from config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -145,7 +146,7 @@ async def text_turn(
         from agent.lang import detect_language
         eff_lang = language if (language and language != "en") else detect_language(text, fallback="en")
         turn_now = None
-        if now:
+        if now and getattr(settings, "enable_test_clock", False):
             from datetime import datetime
             from timeutil import ensure_ist
             try:

@@ -115,8 +115,9 @@ class Settings(BaseSettings):
     recap_hour: int = 20         # 20:30 (8:30 PM)
     recap_minute: int = 30
 
-    # Demo Data
+    # Demo Data & Testing
     enable_demo_data: bool = False
+    enable_test_clock: bool = False
 
     # Usage limits
     daily_token_limit: int = 100000
