@@ -69,6 +69,14 @@ def get_template(category: str, language: str = "en") -> str:
     return lang_dict.get(category, REPLIES["en"][category])
 
 
+def _is_unparseable_guess(change: dict) -> bool:
+    """Return True only for fallback guesses where the phrase couldn't be parsed at all.
+    This excludes vague-phrase hits (e.g. 'before lunch') and AM/PM guesses ('6' -> 18:00).
+    """
+    note = change.get("resolution_note") or ""
+    return note.startswith("Could not parse")
+
+
 def format_created(changes: list, language: str = "en", now: Optional[datetime] = None) -> str:
     """Format single or batch task creation/update confirmation."""
     from timeutil import format_when
@@ -121,7 +129,29 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
         return f"Moved {count} reminders: {', '.join(item_strings)}."
 
     tmpl = get_template("created_multiple", language)
-    return tmpl.format(count=count, items=", ".join(item_strings))
+    base = tmpl.format(count=count, items=", ".join(item_strings))
+
+    # Append a short spoken note for any unparseable-phrase guesses in the batch
+    all_items = created + updated
+    guess_items = [c for c in all_items if _is_unparseable_guess(c)]
+    if guess_items:
+        guess_notes = []
+        for c in guess_items:
+            when_str = format_when(c.get("due_at"), now=now, language=language) if c.get("due_at") else "now"
+            if language == "hi":
+                guess_notes.append(f"{c['title']} का समय मुझे पता नहीं था, {when_str} लगाया।")
+            elif language == "kn":
+                guess_notes.append(f"{c['title']} ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ {when_str} ಹೊಂದಿಸಿದ್ದೇನೆ।")
+            else:
+                guess_notes.append(f"{c['title']} was a guess — I set it for {when_str}.")
+        if language == "hi":
+            base = base + " " + " ".join(guess_notes) + " अगर दूसरा समय चाहिए तो बताइए।"
+        elif language == "kn":
+            base = base + " " + " ".join(guess_notes) + " ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ತಿಳಿಸಿ."
+        else:
+            base = base + " " + " ".join(guess_notes) + " Tell me if you want a different time."
+
+    return base
 
 
 def format_snoozed(title: str, minutes: int, language: str = "en", until: Optional[str] = None) -> str:

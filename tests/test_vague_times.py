@@ -142,3 +142,23 @@ def test_guess_reply_hindi():
     reply = format_created(changes, language="hi", now=FROZEN_NOW)
     assert "Kirana" in reply
     assert "समय पता नहीं था" in reply or "सेट किया" in reply, f"Expected Hindi guess phrasing, got: {reply!r}"
+
+
+def test_batch_guess_note_in_reply():
+    """Batch reply mentions unparseable-phrase guesses by name with a short note."""
+    changes = [
+        {"type": "created", "title": "Standup", "due_at": "2026-10-31T10:00:00+05:30", "needs_confirmation": False, "resolution_note": "Exact time: 10:00"},
+        {"type": "created", "title": "Send invoice", "due_at": "2026-10-31T12:30:00+05:30", "needs_confirmation": True, "resolution_note": "Vague phrase 'before lunch' -> 12:30"},
+        {"type": "created", "title": "Gym", "due_at": "2026-10-31T18:00:00+05:30", "needs_confirmation": True, "resolution_note": "Guessed PM for bare '6' (assumed evening)"},
+        {"type": "created", "title": "Groceries", "due_at": "2026-10-31T19:00:00+05:30", "needs_confirmation": True, "resolution_note": "Could not parse 'on the way back'; scheduled 60 min after previous task at 06:00 PM"},
+    ]
+    reply = format_created(changes, language="en", now=FROZEN_NOW)
+    assert "Got it, 4 reminders set" in reply
+    assert "Groceries was a guess" in reply
+    assert "Tell me if you want a different time" in reply
+    # Vague-phrase and AM/PM guesses must NOT get the guess note
+    assert "Send invoice was a guess" not in reply
+    assert "Gym was a guess" not in reply
+    # Day-aware format helper was used
+    assert "today at 7:00 PM" in reply
+
