@@ -307,13 +307,38 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
 
 def _handle_update_task(db, args: dict, now: datetime) -> dict:
     """Update an existing task."""
+    from agent.matcher import find_task_by_title
     task_id = args.get("task_id")
-    task = db.query(Task).filter_by(id=task_id).first()
-    if not task:
-        return {"type": "error", "message": f"Task #{task_id} not found"}
+    target_title = (args.get("target_title") or args.get("old_title") or args.get("title") or "").strip()
 
-    if args.get("title"):
-        task.title = args["title"]
+    active_tasks = db.query(Task).filter(
+        Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
+    ).all()
+
+    task = None
+    if target_title:
+        status, matched, candidates = find_task_by_title(db, target_title, active_tasks=active_tasks, cutoff=0.6, margin=0.1)
+        if status == "ambiguous":
+            return {
+                "type": "update_ambiguous",
+                "target": target_title,
+                "candidates": candidates,
+            }
+        elif status == "matched":
+            task = matched
+
+    if not task and task_id:
+        try:
+            task = db.query(Task).filter_by(id=int(task_id)).first()
+        except (ValueError, TypeError):
+            task = None
+
+    if not task:
+        return {"type": "error", "message": f"Task not found"}
+
+    if args.get("new_title"):
+        task.title = args["new_title"]
+
     if args.get("time_phrase"):
         resolved = resolve_time(args["time_phrase"], now=now)
         task.due_at = to_ist_naive(resolved.dt)
@@ -336,49 +361,47 @@ def _handle_update_task(db, args: dict, now: datetime) -> dict:
 
 def _handle_cancel_task(db, args: dict) -> dict:
     """Cancel a task."""
-    import difflib
+    from agent.matcher import find_task_by_title
     task_id = args.get("task_id")
     target_title = (args.get("title") or "").strip()
-
-    task = None
-    if task_id:
-        try:
-            task = db.query(Task).filter_by(id=int(task_id)).first()
-        except (ValueError, TypeError):
-            task = None
 
     active_tasks = db.query(Task).filter(
         Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
     ).all()
 
-    if task and task.status == TaskStatus.CANCELLED.value:
-        task = None
-
-    if not task and target_title:
-        # 1. Exact or substring match (case-insensitive, in either direction)
-        for t in active_tasks:
-            t_low = t.title.lower()
-            tgt_low = target_title.lower()
-            if tgt_low == t_low or tgt_low in t_low or t_low in tgt_low:
-                task = t
-                break
-
-    if not task and target_title and active_tasks:
-        # 2. Fuzzy match with difflib (cutoff 0.5 to catch phonetic distortions like 'mona search' -> 'Mohan Aswar')
-        title_map = {t.title.lower(): t for t in active_tasks}
-        matches = difflib.get_close_matches(target_title.lower(), list(title_map.keys()), n=1, cutoff=0.5)
-        if matches:
-            task = title_map[matches[0]]
-
-    if not task:
-        candidates = [t.title for t in active_tasks]
-        lookup = target_title or (str(task_id) if task_id else "")
-        matches = difflib.get_close_matches(lookup, candidates, n=1, cutoff=0.3) if lookup and candidates else []
-        closest = matches[0] if matches else (candidates[0] if candidates else None)
+    # Prioritize matching target_title if provided (avoids arbitrary LLM task_id on ambiguous queries)
+    if target_title:
+        status, task, candidates = find_task_by_title(db, target_title, active_tasks=active_tasks, cutoff=0.6, margin=0.1)
+        if status == "ambiguous":
+            return {
+                "type": "cancel_ambiguous",
+                "target": target_title,
+                "candidates": candidates,
+            }
+        elif status == "not_found":
+            return {
+                "type": "cancel_not_found",
+                "target": target_title,
+                "closest": candidates[0] if candidates else (active_tasks[0].title if active_tasks else None),
+            }
+    elif task_id:
+        try:
+            task = db.query(Task).filter_by(id=int(task_id)).first()
+            if task and task.status == TaskStatus.CANCELLED.value:
+                task = None
+        except (ValueError, TypeError):
+            task = None
+        if not task:
+            return {
+                "type": "cancel_not_found",
+                "target": str(task_id),
+                "closest": active_tasks[0].title if active_tasks else None,
+            }
+    else:
         return {
             "type": "cancel_not_found",
-            "target": target_title or str(task_id or ""),
-            "closest": closest,
+            "target": "",
+            "closest": active_tasks[0].title if active_tasks else None,
         }
 
     task.status = TaskStatus.CANCELLED.value
@@ -395,10 +418,15 @@ def _generate_confirmation(task_changes: list, language: str, now: Optional[date
     """Generate a clean, spoken confirmation sentence in the user's language."""
     from agent.replies import (
         format_created, format_cancelled, format_cancel_not_found,
-        format_fallback
+        format_fallback, format_ambiguous
     )
     if not task_changes:
         return format_fallback(language)
+
+    # Check for ambiguity first!
+    ambig_changes = [c for c in task_changes if c.get("type") in ("cancel_ambiguous", "update_ambiguous", "ambiguous")]
+    if ambig_changes:
+        return format_ambiguous(ambig_changes[0].get("candidates", []), language)
 
     # Check for cancel actions
     cancel_changes = [c for c in task_changes if c.get("type") in ("cancelled", "cancel_not_found")]

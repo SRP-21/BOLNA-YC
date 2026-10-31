@@ -16,6 +16,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def is_hint_echo(transcript: str, hint: Optional[str]) -> bool:
+    """Return True if transcript equals or is mostly the prompt hint text (hallucinated echo)."""
+    if not hint or not transcript:
+        return False
+    t_norm = transcript.strip().lower().rstrip(".!?")
+    h_norm = hint.strip().lower().rstrip(".!?")
+    if not t_norm:
+        return False
+    if t_norm == h_norm:
+        return True
+    h_noprefix = h_norm.replace("reminders:", "").strip()
+    if t_norm == h_noprefix:
+        return True
+    import difflib
+    if difflib.SequenceMatcher(None, t_norm, h_norm).ratio() > 0.7:
+        return True
+    if difflib.SequenceMatcher(None, t_norm, h_noprefix).ratio() > 0.7:
+        return True
+    return False
+
+
 @router.post("/api/voice/turn")
 async def voice_turn(
     audio: UploadFile = File(...),
@@ -29,16 +50,25 @@ async def voice_turn(
         audio_bytes = await audio.read()
         mime_type = audio.content_type or "audio/webm"
 
-        # STT (prime Whisper with active task titles for proper nouns)
+        # STT (prime Whisper with active task titles, capped to ~200 tokens, most recent first)
         prompt_hint = None
         db = SessionLocal()
         try:
             active = db.query(Task).filter(
                 Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
-            ).all()
+            ).order_by(Task.id.desc()).all()
             titles = [t.title for t in active if t.title]
             if titles:
-                prompt_hint = f"Reminders: {', '.join(titles)}"
+                selected_titles = []
+                cur_tokens = 0
+                for t in titles:
+                    t_tok = max(1, len(t.split()))
+                    if cur_tokens + t_tok > 200:
+                        break
+                    selected_titles.append(t)
+                    cur_tokens += t_tok
+                if selected_titles:
+                    prompt_hint = f"Reminders: {', '.join(selected_titles)}"
         finally:
             db.close()
 
@@ -57,7 +87,8 @@ async def voice_turn(
         user_text = stt_result.text
         detected_language = stt_result.language
 
-        if not user_text.strip():
+        # Treat empty or hint-echoed transcripts as unclear
+        if not user_text.strip() or is_hint_echo(user_text, prompt_hint):
             return JSONResponse(content={
                 "transcript": "",
                 "reply_text": "I didn't catch that. Could you say it again?",

@@ -9,7 +9,7 @@ from typing import Optional
 REPLIES = {
     "en": {
         "created_single": "Got it, reminder set: {title} for {time}.",
-        "created_multiple": "Got it, {count} reminders set: {items}.",
+        "created_multiple": "Got it, {count} reminders set.",
         "needs_confirmation_guess": "I wasn't sure when, so I set {title} for {time}. Tell me if you want a different time.",
         "updated": "Moved {title} to {time}.",
         "snoozed": "Snoozed {title} for {minutes} minutes.",
@@ -19,6 +19,7 @@ REPLIES = {
         "cancelled": "Cancelled {title}.",
         "cancel_closest": "Could not find that task. Did you mean '{closest}'?",
         "cancel_not_found": "Could not find that task to cancel.",
+        "ambiguous_which": "Which one did you mean: {candidates}?",
         "question_help": "I can set, move, snooze or cancel reminders. What would you like to do?",
         "fallback_not_caught": "I didn't catch a task or time in that. Try something like 'dentist at 5 pm tomorrow'.",
         "needs_confirmation": "I've set {title} for {time}. Please confirm if that works.",
@@ -27,7 +28,7 @@ REPLIES = {
     },
     "hi": {
         "created_single": "ठीक है, {title} का रिमाइंडर {time} सेट कर दिया गया है।",
-        "created_multiple": "ठीक है, {count} रिमाइंडर सेट कर दिए गए हैं: {items}।",
+        "created_multiple": "ठीक है, {count} रिमाइंडर सेट कर दिए गए हैं।",
         "needs_confirmation_guess": "मुझे समय पता नहीं था, इसलिए {title} को {time} पर सेट किया। अगर दूसरा समय चाहिए तो बताइए।",
         "updated": "{title} को {time} शिफ्ट कर दिया गया है।",
         "snoozed": "{title} को {minutes} मिनट के लिए स्नूज़ कर दिया गया है।",
@@ -37,6 +38,7 @@ REPLIES = {
         "cancelled": "{title} रद्द कर दिया गया है।",
         "cancel_closest": "वह कार्य नहीं मिला। क्या आपका मतलब '{closest}' था?",
         "cancel_not_found": "रद्द करने के लिए वह कार्य नहीं मिला।",
+        "ambiguous_which": "आपका कौन सा मतलब था: {candidates}?",
         "question_help": "मैं रिमाइंडर सेट, आगे बढ़ा, स्नूज़ या रद्द कर सकता हूँ। आप क्या करना चाहते हैं?",
         "fallback_not_caught": "मुझे इसमें कोई कार्य या समय नहीं मिला। जैसे कहें: 'कल शाम 5 बजे डेंटिस्ट'।",
         "needs_confirmation": "मैंने {title} {time} पर सेट किया है। कृपया पुष्टि करें कि क्या यह समय सही है।",
@@ -45,7 +47,7 @@ REPLIES = {
     },
     "kn": {
         "created_single": "ಸರಿ, {title} ರಿಮೈಂಡರ್ ಅನ್ನು {time} ಹೊಂದಿಸಲಾಗಿದೆ.",
-        "created_multiple": "ಸರಿ, {count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಲಾಗಿದೆ: {items}.",
+        "created_multiple": "ಸರಿ, {count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಲಾಗಿದೆ.",
         "needs_confirmation_guess": "ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ {title} ಅನ್ನು {time} ಕ್ಕೆ ಹೊಂದಿಸಿದ್ದೇನೆ. ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ತಿಳಿಸಿ.",
         "updated": "{title} ಅನ್ನು {time} ಬದಲಾಯಿಸಲಾಗಿದೆ.",
         "snoozed": "{title} ಅನ್ನು {minutes} ನಿಮಿಷಗಳ ಕಾಲ ಸ್ನೂಜ್ ಮಾಡಲಾಗಿದೆ.",
@@ -55,6 +57,7 @@ REPLIES = {
         "cancelled": "{title} ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ.",
         "cancel_closest": "ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ. ನೀವು '{closest}' ಅನ್ನು ಉಲ್ಲೇಖಿಸಿದ್ದೀರಾ?",
         "cancel_not_found": "ರದ್ದುಗೊಳಿಸಲು ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ.",
+        "ambiguous_which": "ನಿಮ್ಮ ಉದ್ದೇಶ ಯಾವುದು: {candidates}?",
         "question_help": "ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಬಹುದು, ಮುಂದೂಡಬಹುದು, ಸ್ನೂಜ್ ಮಾಡಬಹುದು ಅಥವಾ ರದ್ದುಗೊಳಿಸಬಹುದು. ನೀವು ಏನು ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
         "fallback_not_caught": "ಅದರಲ್ಲಿ ನನಗೆ ಯಾವುದೇ ಕಾರ್ಯ ಅಥವಾ ಸಮಯ ಕಂಡುಬಂದಿಲ್ಲ. ಉದಾಹರಣೆಗೆ 'ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ ದಂತವೈದ್ಯರ ಭೇಟಿ' ಎಂದು ಹೇಳಿ ನೋಡಿ.",
         "needs_confirmation": "ನಾನು {title} ಅನ್ನು {time} ಕ್ಕೆ ಹೊಂದಿಸಿದ್ದೇನೆ. ಇದು ಸರಿಹೊಂದುತ್ತದೆಯೇ ಎಂದು ದೃಢೀಕರಿಸಿ.",
@@ -123,13 +126,13 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
         return tmpl.format(title=c["title"], time=when_str)
     elif len(created) == 0 and len(updated) > 1:
         if language == "hi":
-            return f"{count} रिमाइंडर अपडेट कर दिए गए हैं: {', '.join(item_strings)}।"
+            return f"{count} रिमाइंडर अपडेट कर दिए गए हैं।"
         elif language == "kn":
-            return f"{count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಬದಲಾಯಿಸಲಾಗಿದೆ: {', '.join(item_strings)}."
-        return f"Moved {count} reminders: {', '.join(item_strings)}."
+            return f"{count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಬದಲಾಯಿಸಲಾಗಿದೆ."
+        return f"Moved {count} reminders."
 
     tmpl = get_template("created_multiple", language)
-    base = tmpl.format(count=count, items=", ".join(item_strings))
+    base = tmpl.format(count=count)
 
     # Append a short spoken note for any unparseable-phrase guesses in the batch
     all_items = created + updated
@@ -180,6 +183,17 @@ def format_cancel_not_found(closest: Optional[str] = None, language: str = "en")
         tmpl = get_template("cancel_closest", language)
         return tmpl.format(closest=closest)
     return get_template("cancel_not_found", language)
+
+
+def format_ambiguous(candidates: list, language: str = "en") -> str:
+    tmpl = get_template("ambiguous_which", language)
+    if language == "hi":
+        cand_str = " या ".join(candidates)
+    elif language == "kn":
+        cand_str = " ಅಥವಾ ".join(candidates)
+    else:
+        cand_str = " or ".join(candidates)
+    return tmpl.format(candidates=cand_str)
 
 
 def format_rescheduled(title: str, time_str: str, language: str = "en") -> str:

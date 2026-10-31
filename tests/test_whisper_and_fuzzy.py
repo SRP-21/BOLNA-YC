@@ -75,6 +75,44 @@ def test_fuzzy_cancel_phonetic_mona_search():
     db.close()
 
 
+@pytest.mark.asyncio
+async def test_ambiguous_gym_asks_which():
+    """When both 'Gym' and 'Gym class' are active, 'cancel gym' asks which one."""
+    db = SessionLocal()
+    t1 = Task(title="Gym", due_at=datetime(2026, 10, 31, 17, 0, 0), status=TaskStatus.SCHEDULED.value)
+    t2 = Task(title="Gym class", due_at=datetime(2026, 10, 31, 18, 0, 0), status=TaskStatus.SCHEDULED.value)
+    db.add_all([t1, t2])
+    db.commit()
+    db.close()
+
+    res = await process_turn("cancel gym", language="en", now=FROZEN_NOW)
+    assert "Which one did you mean" in res["reply_text"]
+    assert "Gym" in res["reply_text"]
+    assert "Gym class" in res["reply_text"]
+
+    # Verify neither task was cancelled
+    db = SessionLocal()
+    active_count = db.query(Task).filter(Task.status == TaskStatus.SCHEDULED.value).count()
+    assert active_count == 2
+    db.close()
+
+
+def test_doctor_does_not_match_dentist_checkup():
+    """'doctor' does not match 'Dentist Checkup' (cutoff 0.6)."""
+    db = SessionLocal()
+    t = Task(title="Dentist Checkup", due_at=datetime(2026, 10, 31, 15, 0, 0), status=TaskStatus.SCHEDULED.value)
+    db.add(t)
+    db.commit()
+
+    result = _handle_cancel_task(db, {"title": "doctor"})
+    assert result["type"] == "cancel_not_found"
+    assert result["closest"] == "Dentist Checkup"
+
+    updated = db.query(Task).filter_by(id=t.id).first()
+    assert updated.status == TaskStatus.SCHEDULED.value
+    db.close()
+
+
 def test_voice_turn_transcription_prompt_contains_active_tasks():
     """In routes/voice.py, transcription prompt hint contains active task titles."""
     client = TestClient(app)
@@ -161,3 +199,69 @@ async def test_groq_stt_passes_prompt_to_api():
         assert mock_create.called
         create_kwargs = mock_create.call_args.kwargs
         assert create_kwargs.get("prompt") == "Reminders: Mohan Aswar, Standup"
+
+
+def test_hint_truncated_when_many_tasks():
+    """When there are many active tasks, Whisper hint is truncated to ~200 tokens (most recent first)."""
+    client = TestClient(app)
+
+    db = SessionLocal()
+    tasks = [
+        Task(
+            title=f"Task number {i} with long description and extra words",
+            due_at=datetime(2026, 10, 31, 12, 0, 0),
+            status=TaskStatus.SCHEDULED.value,
+        )
+        for i in range(50)
+    ]
+    db.add_all(tasks)
+    db.commit()
+    db.close()
+
+    dummy_stt = STTResult(text="hello", language="en")
+    with patch("routes.voice.registry.transcribe", new_callable=AsyncMock) as mock_stt, \
+         patch("routes.voice.registry.synthesize", new_callable=AsyncMock) as mock_tts:
+        mock_stt.return_value = dummy_stt
+        mock_tts.return_value = MagicMock(use_browser_tts=True, provider="browser", audio_bytes=None)
+
+        resp = client.post(
+            "/api/voice/turn",
+            files={"audio": ("sample.wav", b"dummy_audio_bytes", "audio/wav")},
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_stt.call_args.kwargs
+        prompt = call_kwargs.get("prompt")
+        assert prompt is not None
+        # Verify most recent task (Task number 49) is present at the beginning
+        assert "Task number 49" in prompt
+        # Verify prompt is truncated to approx 200 tokens (words < 220)
+        assert len(prompt.split()) <= 220
+
+
+def test_transcript_equal_to_hint_is_rejected():
+    """If transcript equals or echoes the hint, treat as unclear and ask to repeat without creating tasks."""
+    client = TestClient(app)
+
+    db = SessionLocal()
+    t = Task(title="Mohan Aswar", due_at=datetime(2026, 10, 31, 15, 0, 0), status=TaskStatus.SCHEDULED.value)
+    db.add(t)
+    db.commit()
+    db.close()
+
+    # Whisper echoes the hint back verbatim
+    echo_stt = STTResult(text="Reminders: Mohan Aswar", language="en")
+    with patch("routes.voice.registry.transcribe", new_callable=AsyncMock) as mock_stt, \
+         patch("routes.voice.registry.synthesize", new_callable=AsyncMock) as mock_tts:
+        mock_stt.return_value = echo_stt
+        mock_tts.return_value = MagicMock(use_browser_tts=True, provider="browser", audio_bytes=None)
+
+        resp = client.post(
+            "/api/voice/turn",
+            files={"audio": ("sample.wav", b"dummy_audio_bytes", "audio/wav")},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["transcript"] == ""
+        assert "didn't catch that" in data["reply_text"].lower() or "again" in data["reply_text"].lower()
+        assert data["task_changes"] == []
+
