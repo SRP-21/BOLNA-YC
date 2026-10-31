@@ -1,11 +1,15 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 .pytest_cache/
 venv/
-planner.db*
+*.db
+*.db*
 *.bak
 *.wav
 test_step5.py
 t.mp3
 tts_cache/
+
