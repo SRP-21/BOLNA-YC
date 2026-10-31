@@ -48,6 +48,7 @@ async def fire_reminder(task_id: int):
             return
 
         task.status = TaskStatus.DUE.value
+        task.nudge_count = 0
         db.commit()
 
         due_str = task.due_at.strftime('%I:%M %p') if task.due_at else "now"
@@ -60,10 +61,9 @@ async def fire_reminder(task_id: int):
         )
         logger.info(f"🔔 Reminder fired: #{task.id} {task.title}")
 
-        # Schedule a retry if no response after configured delay
-        retry_time = now_ist() + timedelta(
-            seconds=settings.reminder_retry_delay_seconds
-        )
+        # Schedule nudge 1 (configurable delay, default 2 min)
+        retry_delay = getattr(settings, "nudge_delay_1_seconds", settings.reminder_retry_delay_seconds)
+        retry_time = now_ist() + timedelta(seconds=retry_delay)
         try:
             scheduler.add_job(
                 fire_reminder_retry,
@@ -80,8 +80,8 @@ async def fire_reminder(task_id: int):
 
 async def fire_reminder_retry(task_id: int):
     """
-    Second attempt after no response.
-    If still no response, mark as missed.
+    Second attempt after no response (nudge 1).
+    Schedules final miss escalation after nudge_delay_2_seconds (default 5 min).
     """
     db = SessionLocal()
     try:
@@ -90,16 +90,19 @@ async def fire_reminder_retry(task_id: int):
             return
 
         if task.status == TaskStatus.DUE.value:
+            task.nudge_count = (task.nudge_count or 0) + 1
+            db.commit()
+
             log_event(
                 "reminder_retry",
                 f"Reminder again: {task.title}. Are you done with this?",
                 task_id=task.id
             )
-            logger.info(f"🔔 Retry reminder: #{task.id} {task.title}")
+            logger.info(f"🔔 Retry reminder: #{task.id} {task.title} (nudge #{task.nudge_count})")
 
-            miss_time = now_ist() + timedelta(
-                seconds=settings.reminder_retry_delay_seconds
-            )
+            # Schedule mark_missed after second nudge delay (default 5 min)
+            miss_delay = getattr(settings, "nudge_delay_2_seconds", settings.reminder_retry_delay_seconds)
+            miss_time = now_ist() + timedelta(seconds=miss_delay)
             try:
                 scheduler.add_job(
                     mark_missed,

@@ -352,9 +352,22 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
     # Resolve time (pass anchor_dt for chaining vague phrases after a prior task)
     resolved = resolve_time(time_phrase, now=now, anchor_dt=anchor_dt)
 
+    # Categorize task
+    category = args.get("category")
+    if not category:
+        from agent.categorize import categorize_by_rules
+        category = categorize_by_rules(title) or "other"
+
+    # Check for active learned preference for this category
+    from datetime import timedelta
+    from agent.stats import get_active_preference
+    active_pref = get_active_preference(db, category)
+    if active_pref and active_pref.offset_minutes > 0:
+        resolved.dt += timedelta(minutes=active_pref.offset_minutes)
+        resolved.reasoning += f"; learned preference applied (+{active_pref.offset_minutes}m)"
+
     # Check for duplicates: same title within 30 minutes
     from sqlalchemy import and_
-    from datetime import timedelta
     resolved_naive = to_ist_naive(resolved.dt)
     existing = db.query(Task).filter(
         and_(
@@ -393,7 +406,7 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
         language=language,
         is_fixed=getattr(resolved, "is_fixed", True),
         duration_minutes=args.get("duration_minutes"),
-        category=args.get("category"),
+        category=category,
     )
     db.add(task)
     db.commit()
