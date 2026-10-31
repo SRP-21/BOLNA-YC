@@ -8,3 +8,4 @@ planner.db*
 *.wav
 test_step5.py
 t.mp3
+tts_cache/
