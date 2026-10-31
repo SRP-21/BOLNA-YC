@@ -41,6 +41,7 @@ def resolve_time(
     phrase: str,
     now: Optional[datetime] = None,
     reference_date: Optional[datetime] = None,
+    anchor_dt: Optional[datetime] = None,
 ) -> ResolvedTime:
     """
     Resolve a time phrase to a datetime in IST.
@@ -49,6 +50,9 @@ def resolve_time(
         phrase: The time expression (e.g., "10 am", "before lunch", "kal subah", "in an hour")
         now: Current time (injectable for testing). Defaults to real now in IST.
         reference_date: Base date for resolution. Defaults to today.
+        anchor_dt: Optional anchor time from a prior task in the same utterance.
+                   Used when the phrase cannot be resolved: falls back to anchor+60 min
+                   (rather than now+1 hour) and sets needs_confirmation=True.
 
     Returns:
         ResolvedTime with the resolved datetime and metadata.
@@ -61,6 +65,8 @@ def resolve_time(
         reference_date = now
     else:
         reference_date = ensure_ist(reference_date)
+    if anchor_dt is not None:
+        anchor_dt = ensure_ist(anchor_dt)
 
     phrase_lower = phrase.lower().strip()
     original_phrase = phrase
@@ -184,10 +190,21 @@ def resolve_time(
             )
 
     # --- 5. Fallback: couldn't parse, mark for confirmation ---
-    resolved = now + timedelta(hours=1)
+    # If a prior task in the same utterance was resolved, chain 60 min after it.
+    # Otherwise fall back to now + 1 hour.
+    if anchor_dt is not None:
+        resolved = ensure_ist(anchor_dt) + timedelta(hours=1)
+        reasoning = (
+            f"Could not parse '{original_phrase}'; "
+            f"scheduled 60 min after previous task at "
+            f"{ensure_ist(anchor_dt).strftime('%I:%M %p')}"
+        )
+    else:
+        resolved = now + timedelta(hours=1)
+        reasoning = f"Could not parse '{original_phrase}', defaulted to 1 hour from now"
     return ResolvedTime(
         dt=resolved, needs_confirmation=True,
-        reasoning=f"Could not parse '{original_phrase}', defaulted to 1 hour from now",
+        reasoning=reasoning,
         source_phrase=original_phrase
     )
 

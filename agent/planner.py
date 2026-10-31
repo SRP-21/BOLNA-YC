@@ -205,10 +205,19 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str) -> Op
     if name == "add_tasks":
         tasks_list = args.get("tasks") or []
         items = []
+        last_resolved_dt = None  # anchor for "on the way back"-style vague phrases
         for t_args in tasks_list:
-            c = _handle_add_task(db, t_args, now, language)
+            c = _handle_add_task(db, t_args, now, language, anchor_dt=last_resolved_dt)
             if c:
                 items.append(c)
+                # Update anchor to the last successfully resolved time
+                if c.get("due_at"):
+                    from timeutil import ensure_ist
+                    try:
+                        from datetime import datetime as _dt
+                        last_resolved_dt = _dt.fromisoformat(c["due_at"]).replace(tzinfo=IST)
+                    except Exception:
+                        pass
         return {"type": "batch_created", "items": items}
     elif name == "add_task":
         return _handle_add_task(db, args, now, language)
@@ -223,7 +232,7 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str) -> Op
     return None
 
 
-def _handle_add_task(db, args: dict, now: datetime, language: str) -> dict:
+def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Optional[datetime] = None) -> dict:
     """Create a new task from add_task or add_tasks tool call."""
     title = args.get("title", "Untitled").strip()
     time_phrase = args.get("time_phrase", "in 1 hour")
@@ -231,8 +240,8 @@ def _handle_add_task(db, args: dict, now: datetime, language: str) -> dict:
     if recurrence in ("none", "null", "", None):
         recurrence = None
 
-    # Resolve time
-    resolved = resolve_time(time_phrase, now=now)
+    # Resolve time (pass anchor_dt for chaining vague phrases after a prior task)
+    resolved = resolve_time(time_phrase, now=now, anchor_dt=anchor_dt)
 
     # Check for duplicates: same title within 30 minutes
     from sqlalchemy import and_

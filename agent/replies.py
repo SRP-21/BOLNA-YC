@@ -10,6 +10,7 @@ REPLIES = {
     "en": {
         "created_single": "Got it, reminder set: {title} for {time}.",
         "created_multiple": "Got it, {count} reminders set: {items}.",
+        "needs_confirmation_guess": "I wasn't sure when, so I set {title} for {time}. Tell me if you want a different time.",
         "updated": "Moved {title} to {time}.",
         "snoozed": "Snoozed {title} for {minutes} minutes.",
         "snoozed_until": "Snoozed {title} for {minutes} minutes, until {until}.",
@@ -27,6 +28,7 @@ REPLIES = {
     "hi": {
         "created_single": "ठीक है, {title} का रिमाइंडर {time} सेट कर दिया गया है।",
         "created_multiple": "ठीक है, {count} रिमाइंडर सेट कर दिए गए हैं: {items}।",
+        "needs_confirmation_guess": "मुझे समय पता नहीं था, इसलिए {title} को {time} पर सेट किया। अगर दूसरा समय चाहिए तो बताइए।",
         "updated": "{title} को {time} शिफ्ट कर दिया गया है।",
         "snoozed": "{title} को {minutes} मिनट के लिए स्नूज़ कर दिया गया है।",
         "snoozed_until": "{title} को {minutes} मिनट के लिए स्नूज़ कर दिया गया है, {until} तक।",
@@ -44,6 +46,7 @@ REPLIES = {
     "kn": {
         "created_single": "ಸರಿ, {title} ರಿಮೈಂಡರ್ ಅನ್ನು {time} ಹೊಂದಿಸಲಾಗಿದೆ.",
         "created_multiple": "ಸರಿ, {count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಲಾಗಿದೆ: {items}.",
+        "needs_confirmation_guess": "ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ {title} ಅನ್ನು {time} ಕ್ಕೆ ಹೊಂದಿಸಿದ್ದೇನೆ. ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ತಿಳಿಸಿ.",
         "updated": "{title} ಅನ್ನು {time} ಬದಲಾಯಿಸಲಾಗಿದೆ.",
         "snoozed": "{title} ಅನ್ನು {minutes} ನಿಮಿಷಗಳ ಕಾಲ ಸ್ನೂಜ್ ಮಾಡಲಾಗಿದೆ.",
         "snoozed_until": "{title} ಅನ್ನು {minutes} ನಿಮಿಷಗಳ ಕಾಲ {until} ವರೆಗೆ ಸ್ನೂಜ್ ಮಾಡಲಾಗಿದೆ.",
@@ -99,7 +102,11 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
     if count == 1 and created:
         c = created[0]
         when_str = format_when(c.get("due_at"), now=now, language=language) if c.get("due_at") else "now"
-        tmpl = get_template("created_single", language)
+        # Use "guess" template if time was inferred (needs_confirmation due to vague/unparseable phrase)
+        if c.get("needs_confirmation"):
+            tmpl = get_template("needs_confirmation_guess", language)
+        else:
+            tmpl = get_template("created_single", language)
         return tmpl.format(title=c["title"], time=when_str)
     elif count == 1 and updated:
         c = updated[0]
