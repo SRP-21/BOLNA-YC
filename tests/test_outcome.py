@@ -91,3 +91,59 @@ def test_done_task_cannot_be_rescheduled_via_reply():
     db.close()
 
 
+def test_multi_task_reply_isolation_and_done_rejection():
+    """Verify that posting to task #2 (done) is rejected, and posting to task #3 (scheduled) modifies ONLY #3."""
+    from datetime import datetime
+    from starlette.testclient import TestClient
+    from main import app
+    from db import init_db, SessionLocal, Task, TaskStatus
+
+    init_db()
+    db = SessionLocal()
+    db.query(Task).delete()
+    t1 = Task(id=1, title="Standup", due_at=datetime(2026, 10, 31, 10, 0), status=TaskStatus.SCHEDULED.value, language="en")
+    t2 = Task(id=2, title="Send invoice", due_at=datetime(2026, 10, 31, 12, 30), status=TaskStatus.DONE.value, language="hi")
+    t3 = Task(id=3, title="Gym", due_at=datetime(2026, 10, 31, 18, 0), status=TaskStatus.SCHEDULED.value, language="hi")
+    db.add_all([t1, t2, t3])
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+
+    # 1. Reply to done task #2 -> rejected with already_done
+    r2 = client.post("/api/reminders/2/reply", data={"text": "kal subah"})
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["outcome"] == "already_done"
+    assert "Send invoice" in d2["reply_text"]
+    assert "पहले" in d2["reply_text"] or "already" in d2["reply_text"].lower()
+
+    # Verify rows: #2 still done, #3 still at 18:00
+    db = SessionLocal()
+    db_t2 = db.query(Task).filter_by(id=2).first()
+    db_t3 = db.query(Task).filter_by(id=3).first()
+    assert db_t2.status == TaskStatus.DONE.value
+    assert db_t3.due_at == datetime(2026, 10, 31, 18, 0)
+    db.close()
+
+    # 2. Reply to active task #3 -> rescheduled, ONLY #3 changed
+    r3 = client.post("/api/reminders/3/reply", data={"text": "kal subah"})
+    assert r3.status_code == 200
+    d3 = r3.json()
+    assert d3["outcome"] == "reschedule"
+    assert "Gym" in d3["reply_text"]
+    assert "Send invoice" not in d3["reply_text"]
+
+    db = SessionLocal()
+    db_t1 = db.query(Task).filter_by(id=1).first()
+    db_t2 = db.query(Task).filter_by(id=2).first()
+    db_t3 = db.query(Task).filter_by(id=3).first()
+    assert db_t1.due_at == datetime(2026, 10, 31, 10, 0)
+    assert db_t2.status == TaskStatus.DONE.value
+    assert db_t2.due_at == datetime(2026, 10, 31, 12, 30)  # Unchanged!
+    assert db_t3.due_at.hour == 9  # Tomorrow morning!
+    assert db_t3.status == TaskStatus.SCHEDULED.value
+    db.close()
+
+
+
