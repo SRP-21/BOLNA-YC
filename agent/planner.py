@@ -72,25 +72,40 @@ def _get_recent_turns(db, limit: int = 4) -> list[dict]:
     return turns
 
 
-DESTRUCTIVE_COMMAND_WORDS = [
+DESTRUCTIVE_STEMS = [
     # English
-    "cancel", "remove", "delete", "drop", "clear", "discard",
-    # Hindi / Hinglish Latin
-    "hata do", "hatao", "hata de", "hata dena", "cancel karo", "cancel kar do",
-    "radd karo", "radd kar do", "delete karo", "delete kar do", "nikal do", "nikalo",
-    # Hindi Devanagari
-    "हटा दो", "हटाओ", "हटा देना", "रद्द करो", "रद्द कर दो", "कैंसिल करो", "कैंसिल कर दो", "डिलीट करो", "निकाल दो",
-    # Kannada Latin
-    "raddu madi", "raddu madu", "cancel madi", "cancel madu", "tegeduhaku", "tegedu haku", "tegedu haki",
-    # Kannada script
-    "ರದ್ದು ಮಾಡು", "ರದ್ದು ಮಾಡಿ", "ತೆಗೆದುಹಾಕು", "ತೆಗೆದು ಹಾಕು", "ತೆಗೆದು ಹಾಕಿ", "ಕ್ಯಾನ್ಸಲ್ ಮಾಡು", "ಕ್ಯಾನ್ಸಲ್ ಮಾಡಿ", "ರದ್ದು",
+    "cancel", "remove", "delete", "drop", "scrap", "get rid of",
+    # Hindi stems
+    "हटा", "रद्द", "कैंसिल", "hata", "radd",
+    # Kannada stems
+    "ರದ್ದು", "ತೆಗೆ",
 ]
 
 
 def has_destructive_command(text: str) -> bool:
-    """Check if the user utterance contains an explicit command word for a destructive action."""
+    """Match command words by stems across English, Hindi, Hinglish, and Kannada."""
+    import re
     t = text.strip().lower()
-    return any(cmd in t for cmd in DESTRUCTIVE_COMMAND_WORDS)
+
+    # Indic stems (Devanagari and Kannada)
+    indic_stems = ["हटा", "रद्द", "कैंसिल", "ರದ್ದು", "ತೆಗೆ"]
+    for stem in indic_stems:
+        if stem in text:
+            return True
+
+    # Latin stems
+    if re.search(r'\b(cancel\w*|remov\w*|delet\w*|drop\w*|scrap\w*|get\s+rid\s+of|hata\w*|radd\w*)', t):
+        return True
+
+    # forget about (only with a task title, not with it/this/that)
+    if re.search(r'\bforget\s+about\s+(?:the\s+|my\s+)?(?!it\b|this\b|that\b)\w+', t):
+        return True
+
+    # Special rule for 'clear': only destructive if followed by a task title (e.g. 'clear gym')
+    if re.search(r'\bclear\s+(?:the\s+|my\s+)?(?!all\b|everything\b|screen\b|schedule\b|it\b|this\b|that\b)\w+', t):
+        return True
+
+    return False
 
 
 def _is_question(text: str) -> bool:
@@ -218,6 +233,65 @@ async def process_turn(
                     "language": language,
                 }
 
+        # Check pending single-task confirmation state
+        from agent.pending_action import get_pending_action, clear_pending_action, set_pending_action, PendingAction
+        pending_act = get_pending_action(now=now)
+
+        YES_WORDS = {
+            "yes", "yeah", "yep", "ok", "okay", "do it", "go ahead",
+            "haan", "ha", "हाँ", "हां", "कर दो", "ठीक है", "ಹೌದು", "ಸರಿ"
+        }
+        NO_WORDS = {
+            "no", "dont", "don't", "nahi", "nahin", "नहीं", "ना", "ಬೇಡ", "ಇಲ್ಲ"
+        }
+        text_clean = user_text.strip(" !.,?:;\"'").lower()
+        is_yes = (text_clean in YES_WORDS) or any(text_clean == y or text_clean.startswith(y + " ") for y in YES_WORDS)
+        is_no = (text_clean in NO_WORDS) or any(text_clean == y or text_clean.startswith(y + " ") for y in NO_WORDS)
+
+        if pending_act:
+            resp_lang = language if language != "en" else (pending_act.language or "en")
+            if is_yes:
+                # Re-check task in DB
+                task = db.query(Task).filter_by(id=pending_act.task_id).first()
+                if not task or task.status not in (TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value):
+                    clear_pending_action()
+                    from agent.replies import format_already_done
+                    reply_text = format_already_done(pending_act.title, resp_lang)
+                    agent_utt = Utterance(role="assistant", text=reply_text, language=resp_lang)
+                    db.add(agent_utt)
+                    db.commit()
+                    log_event("agent_reply", reply_text)
+                    return {"reply_text": reply_text, "task_changes": [], "language": resp_lang}
+                else:
+                    task.status = TaskStatus.CANCELLED.value
+                    db.commit()
+                    from scheduler import remove_task_job
+                    remove_task_job(task.id)
+                    log_event("task_cancelled", f"Cancelled: {task.title}", task_id=task.id)
+                    clear_pending_action()
+                    from agent.replies import format_cancelled
+                    reply_text = format_cancelled(task.title, resp_lang)
+
+                agent_utt = Utterance(role="assistant", text=reply_text, language=resp_lang)
+                db.add(agent_utt)
+                db.commit()
+                log_event("agent_reply", reply_text)
+                return {"reply_text": reply_text, "task_changes": [{"type": "cancelled", "title": pending_act.title}], "language": resp_lang}
+
+            elif is_no:
+                clear_pending_action()
+                from agent.replies import format_cancel_aborted_leave
+                reply_text = format_cancel_aborted_leave(pending_act.title, resp_lang)
+                agent_utt = Utterance(role="assistant", text=reply_text, language=resp_lang)
+                db.add(agent_utt)
+                db.commit()
+                log_event("agent_reply", reply_text)
+                return {"reply_text": reply_text, "task_changes": [], "language": resp_lang}
+
+            else:
+                # ANY other utterance clears the pending state and is processed normally
+                clear_pending_action()
+
         # Check pending replan confirmation (yes / no)
         pending_plan = get_pending_plan()
         if pending_plan and conf_rule in ("yes", "no"):
@@ -244,6 +318,18 @@ async def process_turn(
             db.commit()
             log_event("agent_reply", reply_text)
             return {"reply_text": reply_text, "task_changes": [], "language": language}
+
+        # If neither pending_act nor pending_plan exists:
+        # Expired or missing state: a bare "yes" gets a short "Yes to what? I don't have a pending question." reply and changes nothing
+        if not pending_act and not pending_plan:
+            if text_clean in YES_WORDS:
+                from agent.replies import format_yes_to_what_no_pending
+                reply_text = format_yes_to_what_no_pending(language)
+                agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+                db.add(agent_utt)
+                db.commit()
+                log_event("agent_reply", reply_text)
+                return {"reply_text": reply_text, "task_changes": [], "language": language}
 
         # Check if user requested replan ("push everything by 45 min", "free after 5", "swap invoice and groceries", etc.)
         replan_intent = await extract_replan_intent(user_text, now)
@@ -396,7 +482,7 @@ async def _execute_tool(db, tool_call: dict, now: datetime, language: str, user_
     elif name == "update_task":
         return _handle_update_task(db, args, now)
     elif name == "cancel_task":
-        return _handle_cancel_task(db, args, user_text=user_text, language=language)
+        return _handle_cancel_task(db, args, user_text=user_text, language=language, now=now)
     elif name == "ask_clarification":
         return {"type": "clarification", "question": args.get("question", "")}
 
@@ -570,15 +656,28 @@ def _handle_update_task(db, args: dict, now: datetime) -> dict:
     }
 
 
-def _handle_cancel_task(db, args: dict, user_text: str = "", language: str = "en") -> dict:
+def _handle_cancel_task(db, args: dict, user_text: str = "", language: str = "en", now: Optional[datetime] = None) -> dict:
     """
     Cancel a task with safety checks:
-    - Rule 1: No command word in user_text -> NEVER execute destructive action.
-    - Rule 2: Command word AND question phrasing together -> do NOT execute silently; ask "Should I cancel <title>?"
-    - Rule 3: Plain command -> execute directly.
+    - Rule 1: No command word AND is a question (e.g. "why is it still there?", "यह अभी भी क्यों है?") -> question_help.
+    - Rule 2: Command word AND question phrasing together (e.g. "can you remove the gym?") -> ask "Should I cancel <title>?" (destructive_confirm_prompt) and set pending confirmation.
+    - Rule 3: No command word AND NOT a question (e.g. "forget the gym") -> ask "Do you want me to cancel <title>?" (destructive_want_confirm) and set pending confirmation.
+    - Rule 4: Plain command -> execute directly.
+    - Ambiguous: ask which one (candidates).
     - Not-found: only offer "did you mean" when score passes cutoff (otherwise closest is None).
     """
     from agent.matcher import find_task_by_title
+    from agent.pending_action import set_pending_action, PendingAction
+    from timeutil import ensure_ist, now_ist
+    import re
+
+    has_cmd = has_destructive_command(user_text) if user_text else False
+    is_q = _is_question(user_text) if user_text else False
+
+    # Rule 1: If it is a question and has NO command word, never act or prompt; return question help
+    if user_text and not has_cmd and is_q:
+        return {"type": "question_help"}
+
     task_id = args.get("task_id")
     target_title = (args.get("title") or "").strip()
 
@@ -586,24 +685,26 @@ def _handle_cancel_task(db, args: dict, user_text: str = "", language: str = "en
         Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
     ).all()
 
-    # Rule 1: No explicit command word in the current utterance
-    if user_text and not has_destructive_command(user_text):
-        if _is_question(user_text):
-            return {"type": "question_help"}
-        return {"type": "not_command_blocked"}
-
     # Extract target title from user_text if not provided in args
     if not target_title and user_text:
         text_lower = user_text.lower()
-        found_cmd = None
-        for cmd in DESTRUCTIVE_COMMAND_WORDS:
-            if cmd in text_lower:
-                found_cmd = cmd
+        found_stem = None
+        for stem in DESTRUCTIVE_STEMS:
+            if stem in text_lower:
+                found_stem = stem
                 break
-        if found_cmd:
-            target_title = text_lower.split(found_cmd, 1)[1].replace("the", "").replace("my", "").replace("ko", "").replace("annu", "").strip()
-            if not target_title:
-                target_title = text_lower.split(found_cmd, 1)[0].replace("the", "").replace("my", "").replace("ko", "").replace("annu", "").strip()
+        if found_stem:
+            after = text_lower.split(found_stem, 1)[1]
+            before = text_lower.split(found_stem, 1)[0]
+            for p in ["the", "my", "ko", "annu", "bhi", "please", "karo", "kar do", "madi", "madu", "ಮಾಡೀ", "ಮಾಡು"]:
+                after = re.sub(rf'\b{p}\b', '', after).strip()
+                before = re.sub(rf'\b{p}\b', '', before).strip()
+            target_title = after or before
+        else:
+            # Check for phrases like "forget the gym" or "clear gym"
+            cleaned = re.sub(r'^(?:can\s+you\s+|could\s+you\s+|please\s+)?(?:forget|clear)\s+(?:about\s+)?(?:the\s+|my\s+)?', '', text_lower).strip()
+            if cleaned:
+                target_title = cleaned
 
     task = None
     if target_title:
@@ -640,15 +741,42 @@ def _handle_cancel_task(db, args: dict, user_text: str = "", language: str = "en
             "closest": None,
         }
 
-    # Rule 2: Command word AND question phrasing together -> do NOT execute silently; ask "Should I cancel <title>?"
-    if user_text and _is_question(user_text):
+    # Task is found! Check confirmation conditions:
+    ref_now = ensure_ist(now) if now is not None else now_ist()
+
+    # Rule 2: Command word AND question phrasing -> ask "Should I cancel <title>?"
+    if user_text and is_q:
+        set_pending_action(PendingAction(
+            action="cancel",
+            task_id=task.id,
+            title=task.title,
+            language=language,
+            created_at=ref_now,
+        ))
         return {
             "type": "destructive_confirm_prompt",
+            "task_id": task.id,
             "title": task.title,
             "language": language,
         }
 
-    # Rule 3: Direct command -> execute cancellation!
+    # Rule 3: NOT a question and NO command word (e.g. "forget the gym") -> ask "Do you want me to cancel <title>?"
+    if user_text and not has_cmd:
+        set_pending_action(PendingAction(
+            action="cancel",
+            task_id=task.id,
+            title=task.title,
+            language=language,
+            created_at=ref_now,
+        ))
+        return {
+            "type": "destructive_want_confirm",
+            "task_id": task.id,
+            "title": task.title,
+            "language": language,
+        }
+
+    # Rule 4: Plain command -> execute cancellation!
     task.status = TaskStatus.CANCELLED.value
     db.commit()
 
@@ -664,7 +792,7 @@ def _generate_confirmation(task_changes: list, language: str, now: Optional[date
     from agent.replies import (
         format_created, format_cancelled, format_cancel_not_found,
         format_fallback, format_ambiguous, format_cancel_confirm_prompt,
-        format_question_help
+        format_cancel_want_confirm, format_question_help
     )
     if not task_changes:
         return format_fallback(language)
@@ -673,6 +801,11 @@ def _generate_confirmation(task_changes: list, language: str, now: Optional[date
     confirm_prompts = [c for c in task_changes if c.get("type") == "destructive_confirm_prompt"]
     if confirm_prompts:
         return format_cancel_confirm_prompt(confirm_prompts[0].get("title", "this task"), language)
+
+    # Check for want confirmation ("Do you want me to cancel <title>?")
+    want_prompts = [c for c in task_changes if c.get("type") == "destructive_want_confirm"]
+    if want_prompts:
+        return format_cancel_want_confirm(want_prompts[0].get("title", "this task"), language)
 
     # Check for question help
     if any(c.get("type") == "question_help" for c in task_changes):

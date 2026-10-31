@@ -11,6 +11,16 @@ from typing import Optional, Tuple, List
 from db import Task, TaskStatus
 
 
+COMMON_TRANSCRIPT_MAP = {
+    "जिम": "gym",
+    "ಜಿಮ್": "gym",
+    "डॉक्टर": "doctor",
+    "ವೈದ್ಯ": "doctor",
+    "दवा": "medicine",
+    "ಔಷಧಿ": "medicine",
+}
+
+
 def score_match(query: str, title: str) -> float:
     """Compute matching score between query and a candidate title."""
     q = query.lower().strip()
@@ -19,6 +29,11 @@ def score_match(query: str, title: str) -> float:
         return 0.0
     if q == t:
         return 1.0
+
+    if q in COMMON_TRANSCRIPT_MAP:
+        mapped = COMMON_TRANSCRIPT_MAP[q]
+        if mapped in t.split() or t.startswith(mapped + " ") or t == mapped:
+            return 0.95
 
     q_words = q.split()
     t_words = t.split()

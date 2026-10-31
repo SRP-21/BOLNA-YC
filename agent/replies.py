@@ -20,6 +20,9 @@ REPLIES = {
         "cancel_closest": "Could not find that task. Did you mean '{closest}'?",
         "cancel_not_found": "Could not find that task to cancel.",
         "cancel_confirm_prompt": "Should I cancel {title}?",
+        "cancel_want_confirm": "Do you want me to cancel {title}?",
+        "cancel_aborted_leave": "Okay, I'll leave {title}.",
+        "yes_to_what_no_pending": "Yes to what? I don't have a pending question.",
         "ambiguous_which": "Which one did you mean: {candidates}?",
         "already_done": "{title} is already marked as done.",
         "question_help": "I can set, move, snooze or cancel reminders. What would you like to do?",
@@ -41,6 +44,9 @@ REPLIES = {
         "cancel_closest": "वह कार्य नहीं मिला। क्या आपका मतलब '{closest}' था?",
         "cancel_not_found": "रद्द करने के लिए वह कार्य नहीं मिला।",
         "cancel_confirm_prompt": "क्या मैं {title} को रद्द कर दूँ?",
+        "cancel_want_confirm": "क्या आप चाहते हैं कि मैं {title} को रद्द कर दूँ?",
+        "cancel_aborted_leave": "ठीक है, मैं {title} को वैसे ही रहने दूंगा।",
+        "yes_to_what_no_pending": "किसके लिए हाँ? मेरे पास कोई लंबित सवाल नहीं है।",
         "ambiguous_which": "आपका कौन सा मतलब था: {candidates}?",
         "already_done": "{title} पहले ही पूरा हो चुका है।",
         "question_help": "मैं रिमाइंडर सेट, आगे बढ़ा, स्नूज़ या रद्द कर सकता हूँ। आप क्या करना चाहते हैं?",
@@ -62,6 +68,9 @@ REPLIES = {
         "cancel_closest": "ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ. ನೀವು '{closest}' ಅನ್ನು ಉಲ್ಲೇಖಿಸಿದ್ದೀರಾ?",
         "cancel_not_found": "ರದ್ದುಗೊಳಿಸಲು ಆ ಕಾರ್ಯ ಕಂಡುಬಂದಿಲ್ಲ.",
         "cancel_confirm_prompt": "ನಾನು {title} ಅನ್ನು ರದ್ದುಗೊಳಿಸಬೇಕೇ?",
+        "cancel_want_confirm": "ನಾನು {title} ಅನ್ನು ರದ್ದುಗೊಳಿಸಬೇಕೆಂದು ನೀವು ಬಯಸುತ್ತೀರಾ?",
+        "cancel_aborted_leave": "ಸರಿ, ನಾನು {title} ಅನ್ನು ಹಾಗೆಯೇ ಬಿಡುತ್ತೇನೆ.",
+        "yes_to_what_no_pending": "ಯಾವುದಕ್ಕೆ ಹೌದು? ನನ್ನ ಬಳಿ ಯಾವುದೇ ಬಾಕಿ ಉಳಿದ ಪ್ರಶ್ನೆ ಇಲ್ಲ.",
         "ambiguous_which": "ನಿಮ್ಮ ಉದ್ದೇಶ ಯಾವುದು: {candidates}?",
         "already_done": "{title} ಈಗಾಗಲೇ ಮುಕ್ತಾಯಗೊಂಡಿದೆ.",
         "question_help": "ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಬಹುದು, ಮುಂದೂಡಬಹುದು, ಸ್ನೂಜ್ ಮಾಡಬಹುದು ಅಥವಾ ರದ್ದುಗೊಳಿಸಬಹುದು. ನೀವು ಏನು ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
@@ -220,6 +229,20 @@ def format_reminder_prompt(title: str, time_str: str, language: str = "en") -> s
 def format_cancel_confirm_prompt(title: str, language: str = "en") -> str:
     tmpl = get_template("cancel_confirm_prompt", language)
     return tmpl.format(title=title)
+
+
+def format_cancel_want_confirm(title: str, language: str = "en") -> str:
+    tmpl = get_template("cancel_want_confirm", language)
+    return tmpl.format(title=title)
+
+
+def format_cancel_aborted_leave(title: str, language: str = "en") -> str:
+    tmpl = get_template("cancel_aborted_leave", language)
+    return tmpl.format(title=title)
+
+
+def format_yes_to_what_no_pending(language: str = "en") -> str:
+    return get_template("yes_to_what_no_pending", language)
 
 
 def format_question_help(language: str = "en") -> str:
