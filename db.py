@@ -12,9 +12,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, timezone
+import os
 import enum
 
-DATABASE_URL = "sqlite:///./planner.db"
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./planner.db")
 
 # connect_args timeout=20 ensures waiting gracefully on concurrency
 engine = create_engine(

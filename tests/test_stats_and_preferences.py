@@ -151,13 +151,24 @@ def test_decline_cooldown_14_days():
 @pytest.mark.asyncio
 async def test_learned_offset_applied_to_new_tasks():
     """When a learned preference is active (+20m for health), new health tasks get scheduled 20m later."""
+    from unittest.mock import patch, AsyncMock
+    from providers.registry import registry
+
     db = SessionLocal()
     apply_learned_preference(db, category="health", offset_minutes=20, evidence_count=4)
     db.close()
 
-    # Create new health task at 6 PM (18:00)
-    res = await process_turn("gym at 6 pm", language="en", now=FROZEN_NOW)
-    assert res is not None
+    # Create new health task at 6 PM (18:00) with mocked offline LLM tool call
+    with patch.object(registry.llm, "chat", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = {
+            "content": "",
+            "tool_calls": [{
+                "name": "add_task",
+                "arguments": {"title": "Gym", "time_phrase": "6 pm"}
+            }]
+        }
+        res = await process_turn("gym at 6 pm", language="en", now=FROZEN_NOW)
+        assert res is not None
 
     db = SessionLocal()
     gym_task = db.query(Task).filter(Task.title.ilike("%gym%")).first()

@@ -119,9 +119,9 @@ class Settings(BaseSettings):
     enable_demo_data: bool = False
 
     # Usage limits
-    daily_token_limit: int = 1000000
-    daily_stt_requests: int = 1000
-    daily_tts_requests: int = 1000
+    daily_token_limit: int = 100000
+    daily_stt_requests: int = 200
+    daily_tts_requests: int = 300
 
 
 settings = Settings()
