@@ -37,14 +37,14 @@ def test_format_when_relative_days():
     # 1. Today at 7:00 PM (Friday Oct 30)
     today_evening = datetime(2026, 10, 30, 19, 0, 0, tzinfo=IST)
     assert format_when(today_evening, now=FROZEN_NOW, language="en") == "today at 7:00 PM"
-    assert format_when(today_evening, now=FROZEN_NOW, language="hi") == "आज 7:00 PM बजे"
-    assert format_when(today_evening, now=FROZEN_NOW, language="kn") == "ಇಂದು 7:00 PM ಕ್ಕೆ"
+    assert format_when(today_evening, now=FROZEN_NOW, language="hi") == "आज शाम 7 बजे"
+    assert format_when(today_evening, now=FROZEN_NOW, language="kn") == "ಇಂದು ಸಂಜೆ 7 ಗಂಟೆಗೆ"
 
     # 2. Tomorrow at 9:00 AM (Saturday Oct 31)
     tomorrow_morning = datetime(2026, 10, 31, 9, 0, 0, tzinfo=IST)
     assert format_when(tomorrow_morning, now=FROZEN_NOW, language="en") == "tomorrow at 9:00 AM"
-    assert format_when(tomorrow_morning, now=FROZEN_NOW, language="hi") == "कल 9:00 AM बजे"
-    assert format_when(tomorrow_morning, now=FROZEN_NOW, language="kn") == "ನಾಳೆ 9:00 AM ಕ್ಕೆ"
+    assert format_when(tomorrow_morning, now=FROZEN_NOW, language="hi") == "कल सुबह 9 बजे"
+    assert format_when(tomorrow_morning, now=FROZEN_NOW, language="kn") == "ನಾಳೆ ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆಗೆ"
 
     # 3. Monday at 10:00 AM (Monday Nov 2, 3 days out < 7)
     monday_morning = datetime(2026, 11, 2, 10, 0, 0, tzinfo=IST)

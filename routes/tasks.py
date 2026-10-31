@@ -131,12 +131,12 @@ async def fire_now(task_id: int):
         task.status = TaskStatus.DUE.value
         db.commit()
 
-        due_str = task.due_at.strftime('%I:%M %p') if task.due_at else "now"
+        due_val = task.due_at if task.due_at else "now"
         from agent.replies import format_reminder_prompt
         task_lang = task.language or "en"
         log_event(
             "reminder_fired",
-            format_reminder_prompt(task.title, due_str, task_lang),
+            format_reminder_prompt(task.title, due_val, task_lang),
             task_id=task.id
         )
         return {"ok": True, "task_id": task.id, "title": task.title}

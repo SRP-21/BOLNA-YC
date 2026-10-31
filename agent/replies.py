@@ -34,7 +34,7 @@ REPLIES = {
     "hi": {
         "created_single": "ठीक है, {title} का रिमाइंडर {time} सेट कर दिया गया है।",
         "created_multiple": "ठीक है, {count} रिमाइंडर सेट कर दिए गए हैं।",
-        "needs_confirmation_guess": "मुझे समय पता नहीं था, इसलिए {title} को {time} पर सेट किया। अगर दूसरा समय चाहिए तो बताइए।",
+        "needs_confirmation_guess": "मुझे समय पता नहीं था, इसलिए {title} को {time} सेट किया। अगर दूसरा समय चाहिए तो बताइए।",
         "updated": "{title} को {time} शिफ्ट कर दिया गया है।",
         "snoozed": "{title} को {minutes} मिनट के लिए स्नूज़ कर दिया गया है।",
         "snoozed_until": "{title} को {minutes} मिनट के लिए स्नूज़ कर दिया गया है, {until} तक।",
@@ -51,17 +51,17 @@ REPLIES = {
         "already_done": "{title} पहले ही पूरा हो चुका है।",
         "question_help": "मैं रिमाइंडर सेट, आगे बढ़ा, स्नूज़ या रद्द कर सकता हूँ। आप क्या करना चाहते हैं?",
         "fallback_not_caught": "मुझे इसमें कोई कार्य या समय नहीं मिला। जैसे कहें: 'कल शाम 5 बजे डेंटिस्ट'।",
-        "needs_confirmation": "मैंने {title} {time} पर सेट किया है। कृपया पुष्टि करें कि क्या यह समय सही है।",
+        "needs_confirmation": "मैंने {title} {time} सेट किया है। कृपया पुष्टि करें कि क्या यह समय सही है।",
         "fallback": "मुझे इसमें कोई कार्य या समय नहीं मिला। जैसे कहें: 'कल शाम 5 बजे डेंटिस्ट'।",
         "reminder_prompt": "{title} — {time} बज गए हैं। क्या यह पूरा हो गया, स्नूज़ करना है, या कल के लिए टालें?",
     },
     "kn": {
         "created_single": "ಸರಿ, {title} ರಿಮೈಂಡರ್ ಅನ್ನು {time} ಹೊಂದಿಸಲಾಗಿದೆ.",
         "created_multiple": "ಸರಿ, {count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಲಾಗಿದೆ.",
-        "needs_confirmation_guess": "ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ {title} ಅನ್ನು {time} ಕ್ಕೆ ಹೊಂದಿಸಿದ್ದೇನೆ. ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ತಿಳಿಸಿ.",
+        "needs_confirmation_guess": "ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ {title} ಅನ್ನು {time} ಹೊಂದಿಸಿದ್ದೇನೆ. ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ತಿಳಿಸಿ.",
         "updated": "{title} ಅನ್ನು {time} ಬದಲಾಯಿಸಲಾಗಿದೆ.",
         "snoozed": "{title} ಅನ್ನು {minutes} ನಿಮಿಷಗಳ ಕಾಲ ಸ್ನೂಜ್ ಮಾಡಲಾಗಿದೆ.",
-        "snoozed_until": "{title} ಅನ್ನು {minutes} ನಿಮಿಷಗಳ ಕಾಲ {until} ವರೆಗೆ ಸ್ನೂಜ್ ಮಾಡಲಾಗಿದೆ.",
+        "snoozed_until": "{title} ಅನ್ನು {minutes} ನಿಮಿಷಗಳ ಕಾಲ {until} ಸ್ನೂಜ್ ಮಾಡಲಾಗಿದೆ.",
         "done": "ಉತ್ತಮ, {title} ಮುಕ್ತಾಯಗೊಂಡಿದೆ ಎಂದು ಗುರುತಿಸಲಾಗಿದೆ! ✓",
         "done_recurring": "ಉತ್ತಮ, {title} ಮುಕ್ತಾಯಗೊಂಡಿದೆ! ಮುಂದಿನ ರಿಮೈಂಡರ್ {next_when}.",
         "cancelled": "{title} ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ.",
@@ -75,7 +75,7 @@ REPLIES = {
         "already_done": "{title} ಈಗಾಗಲೇ ಮುಕ್ತಾಯಗೊಂಡಿದೆ.",
         "question_help": "ನಾನು ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಬಹುದು, ಮುಂದೂಡಬಹುದು, ಸ್ನೂಜ್ ಮಾಡಬಹುದು ಅಥವಾ ರದ್ದುಗೊಳಿಸಬಹುದು. ನೀವು ಏನು ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
         "fallback_not_caught": "ಅದರಲ್ಲಿ ನನಗೆ ಯಾವುದೇ ಕಾರ್ಯ ಅಥವಾ ಸಮಯ ಕಂಡುಬಂದಿಲ್ಲ. ಉದಾಹರಣೆಗೆ 'ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ ದಂತವೈದ್ಯರ ಭೇಟಿ' ಎಂದು ಹೇಳಿ ನೋಡಿ.",
-        "needs_confirmation": "ನಾನು {title} ಅನ್ನು {time} ಕ್ಕೆ ಹೊಂದಿಸಿದ್ದೇನೆ. ಇದು ಸರಿಹೊಂದುತ್ತದೆಯೇ ಎಂದು ದೃಢೀಕರಿಸಿ.",
+        "needs_confirmation": "ನಾನು {title} ಅನ್ನು {time} ಹೊಂದಿಸಿದ್ದೇನೆ. ಇದು ಸರಿಹೊಂದುತ್ತದೆಯೇ ಎಂದು ದೃಢೀಕರಿಸಿ.",
         "fallback": "ಅದರಲ್ಲಿ ನನಗೆ ಯಾವುದೇ ಕಾರ್ಯ ಅಥವಾ ಸಮಯ ಕಂಡುಬಂದಿಲ್ಲ. ಉದಾಹರಣೆಗೆ 'ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ ದಂತವೈದ್ಯರ ಭೇಟಿ' ಎಂದು ಹೇಳಿ ನೋಡಿ.",
         "reminder_prompt": "{title} — ಸಮಯ {time} ಆಗಿದೆ. ಮುಗಿದಿದೆಯೇ, ಸ್ನೂಜ್ ಮಾಡಬೇಕೇ ಅಥವಾ ನಾಳೆಗೆ ಮುಂದೂಡಬೇಕೇ?",
     },
@@ -174,8 +174,12 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
 
 def format_snoozed(title: str, minutes: int, language: str = "en", until: Optional[str] = None) -> str:
     if until:
+        until_disp = until
+        if language == "kn" and until.endswith("ಗಂಟೆಗೆ"):
+            # TODO: Review Kannada until phrasing (ಗಂಟೆಗೆ ವರೆಗೆ vs ಗಂಟೆಯವರೆಗೆ)
+            until_disp = until[:-6] + "ಗಂಟೆಯವರೆಗೆ"
         tmpl = get_template("snoozed_until", language)
-        return tmpl.format(title=title, minutes=minutes, until=until)
+        return tmpl.format(title=title, minutes=minutes, until=until_disp)
     tmpl = get_template("snoozed", language)
     return tmpl.format(title=title, minutes=minutes)
 
@@ -221,7 +225,9 @@ def format_rescheduled(title: str, time_str: str, language: str = "en") -> str:
     return tmpl.format(title=title, time=time_str)
 
 
-def format_reminder_prompt(title: str, time_str: str, language: str = "en") -> str:
+def format_reminder_prompt(title: str, time_input, language: str = "en") -> str:
+    from timeutil import format_time_for_reminder
+    time_str = format_time_for_reminder(time_input, language)
     tmpl = get_template("reminder_prompt", language)
     return tmpl.format(title=title, time=time_str)
 
