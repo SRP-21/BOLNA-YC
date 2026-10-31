@@ -26,17 +26,23 @@ client = TestClient(app)
 def clean_db():
     from agent.pending_action import clear_pending_action
     from agent.pending_choice import clear_pending_choice
+    from agent.replan import set_pending_plan
+    from db import Utterance
     clear_pending_action()
     clear_pending_choice()
+    set_pending_plan(None)
     db = SessionLocal()
     db.query(Task).delete()
+    db.query(Utterance).delete()
     db.commit()
     db.close()
     yield
     clear_pending_action()
     clear_pending_choice()
+    set_pending_plan(None)
     db = SessionLocal()
     db.query(Task).delete()
+    db.query(Utterance).delete()
     db.commit()
     db.close()
 
@@ -162,14 +168,87 @@ def test_stop_commands_handled_cleanly():
     """Stop words ('stop', 'that's all', 'bas') go idle without creating tasks and return expects_reply=False."""
     with patch("providers.registry.registry.synthesize", new_callable=AsyncMock) as mock_synth:
         mock_synth.return_value = TTSResult(use_browser_tts=True, provider="browser")
-        for word in ["stop", "that's all", "bas", "बस", "ಸಾಕು"]:
+        for word in ["stop", "Stop.", "that's all", "that is all", "bas", "बस", "ಸಾಕು"]:
             resp = client.post("/api/text/turn", data={"text": word})
             assert resp.status_code == 200
             data = resp.json()
             assert data["expects_reply"] is False
             assert data.get("stopped") is True
             assert "Okay, going idle." in data["reply_text"]
+            assert len(data["task_changes"]) == 0
 
     db = SessionLocal()
     assert db.query(Task).count() == 0
+    db.close()
+
+
+def test_trailing_stop_creates_task_first_then_stops():
+    """A stop phrase at the END of a longer utterance ('gym at 6, that's all') creates task first and then stops."""
+    mock_add = {
+        "id": "call_add_gym",
+        "name": "add_task",
+        "arguments": {"title": "Gym", "time_phrase": "6 pm"}
+    }
+    with patch("providers.registry.registry.synthesize", new_callable=AsyncMock) as mock_synth, \
+         patch("providers.registry.registry.llm.chat", new_callable=AsyncMock) as mock_chat:
+        mock_synth.return_value = TTSResult(use_browser_tts=True, provider="browser")
+        mock_chat.return_value = {"content": None, "tool_calls": [mock_add], "finish_reason": "tool_calls"}
+        resp = client.post("/api/text/turn", data={"text": "gym at 6, that's all"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("stopped") is True
+        assert data["expects_reply"] is False
+        assert len(data["task_changes"]) >= 1
+
+    db = SessionLocal()
+    tasks = db.query(Task).all()
+    assert len(tasks) == 1
+    assert "gym" in tasks[0].title.lower()
+    db.close()
+
+
+def test_stop_by_the_store_stays_task():
+    """'stop by the store at 5' contains 'stop' at the beginning, so it must stay a task and not stop."""
+    mock_add = {
+        "id": "call_add_store",
+        "name": "add_task",
+        "arguments": {"title": "Stop by the store", "time_phrase": "5 pm"}
+    }
+    with patch("providers.registry.registry.synthesize", new_callable=AsyncMock) as mock_synth, \
+         patch("providers.registry.registry.llm.chat", new_callable=AsyncMock) as mock_chat:
+        mock_synth.return_value = TTSResult(use_browser_tts=True, provider="browser")
+        mock_chat.return_value = {"content": None, "tool_calls": [mock_add], "finish_reason": "tool_calls"}
+        resp = client.post("/api/text/turn", data={"text": "stop by the store at 5"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("stopped") is False
+        assert len(data["task_changes"]) >= 1
+
+    db = SessionLocal()
+    tasks = db.query(Task).all()
+    assert len(tasks) == 1
+    assert "store" in tasks[0].title.lower() or "stop" in tasks[0].title.lower()
+    db.close()
+
+
+def test_hindi_bas_5_baje_stays_task():
+    """'बस 5 बजे' begins with 'बस' followed by a time phrase; it must create a task at 5:00 and not stop."""
+    mock_add = {
+        "id": "call_add_hi",
+        "name": "add_task",
+        "arguments": {"title": "बस", "time_phrase": "5 बजे"}
+    }
+    with patch("providers.registry.registry.synthesize", new_callable=AsyncMock) as mock_synth, \
+         patch("providers.registry.registry.llm.chat", new_callable=AsyncMock) as mock_chat:
+        mock_synth.return_value = TTSResult(use_browser_tts=True, provider="browser")
+        mock_chat.return_value = {"content": None, "tool_calls": [mock_add], "finish_reason": "tool_calls"}
+        resp = client.post("/api/text/turn", data={"text": "बस 5 बजे"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("stopped") is False
+        assert len(data["task_changes"]) >= 1
+
+    db = SessionLocal()
+    tasks = db.query(Task).all()
+    assert len(tasks) == 1
     db.close()

@@ -8,5 +8,8 @@
   "end_silence_ms": 1100,
   "no_speech_timeout_ms": 6000,
   "hard_cap_ms": 20000,
-  "smoothing_alpha": 0.3
+  "smoothing_alpha": 0.3,
+  "barge_in_threshold_multiplier": 2.0,
+  "barge_in_min_speech_ms": 400,
+  "post_playback_cooldown_ms": 300
 }

@@ -1,9 +1,10 @@
 /**
- * Voice Activity Detector (VAD) with adaptive noise floor tracking.
+ * Voice Activity Detector (VAD) with adaptive noise floor tracking and barge-in guard.
  * - Noise floor is tracked as the running minimum of smoothed RMS over the last ~2 seconds,
  *   capped at an absolute maximum (0.04), initialized from the quietest frame.
  * - Speech onset at frame 0 or in the first 400 ms is immediately detected.
  * - Speech threshold = max(noiseFloor * multiplier, minSpeechThreshold).
+ * - Barge-in guard: while playback is active, requires 2x threshold and >= 400ms sustained speech.
  * - End of speech = ~1.1 s silence after at least 300 ms speech.
  * - Times out after 6 s if no speech occurs; hard cap at 20 s.
  */
@@ -19,6 +20,9 @@ class AdaptiveVAD {
     this.noSpeechTimeoutMs = config.no_speech_timeout_ms || 6000;
     this.hardCapMs = config.hard_cap_ms || 20000;
     this.smoothingAlpha = config.smoothing_alpha || 0.3;
+    this.bargeInThresholdMultiplier = config.barge_in_threshold_multiplier || 2.0;
+    this.bargeInMinSpeechMs = config.barge_in_min_speech_ms || 400;
+    this.postPlaybackCooldownMs = config.post_playback_cooldown_ms || 300;
 
     this.maxHistoryFrames = Math.max(1, Math.round(this.historyWindowMs / this.frameDurationMs));
     this.reset();
@@ -43,6 +47,7 @@ class AdaptiveVAD {
     this.noiseFloor = null;
     this.speechThreshold = null;
     this.speechAccumulatedMs = 0;
+    this.bargeInAccumulatedMs = 0;
     this.currentSilenceMs = 0;
     this.speechDetected = false;
     this.state = 'listening';
@@ -50,7 +55,7 @@ class AdaptiveVAD {
     this.finalReason = null;
   }
 
-  processFrame(rms, frameDurationMs = null) {
+  processFrame(rms, frameDurationMs = null, isBargeIn = false) {
     const dt = frameDurationMs || this.frameDurationMs;
     if (this.isFinal) {
       return {
@@ -102,10 +107,48 @@ class AdaptiveVAD {
     }
     this.noiseFloor = Math.min(minSmoothed, this.maxNoiseFloor);
 
-    // 4. Speech threshold
+    // 4. Base speech threshold
     this.speechThreshold = Math.max(this.noiseFloor * this.multiplier, this.minSpeechThreshold);
 
-    // 5. Speech detection
+    // 5. Barge-in mode check: requires 2x threshold and >= 400ms sustained speech
+    if (isBargeIn) {
+      const bargeInThresh = this.speechThreshold * this.bargeInThresholdMultiplier;
+      if (rms >= bargeInThresh) {
+        this.bargeInAccumulatedMs += dt;
+        if (this.bargeInAccumulatedMs >= this.bargeInMinSpeechMs) {
+          this.isFinal = true;
+          this.finalReason = 'barge_in';
+          this.state = 'barge_in_triggered';
+          return {
+            state: 'barge_in_triggered',
+            isFinal: true,
+            reason: 'barge_in',
+            rms,
+            noiseFloor: this.noiseFloor,
+            threshold: bargeInThresh,
+          };
+        }
+        return {
+          state: 'barge_in_candidate',
+          isFinal: false,
+          rms,
+          noiseFloor: this.noiseFloor,
+          threshold: bargeInThresh,
+        };
+      } else {
+        // Sustained speech broken
+        this.bargeInAccumulatedMs = 0;
+        return {
+          state: 'listening',
+          isFinal: false,
+          rms,
+          noiseFloor: this.noiseFloor,
+          threshold: bargeInThresh,
+        };
+      }
+    }
+
+    // Standard speech detection
     const isSpeechFrame = rms >= this.speechThreshold;
 
     if (isSpeechFrame) {

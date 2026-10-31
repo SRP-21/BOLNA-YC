@@ -18,25 +18,48 @@ import re
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-STOP_TRAILING_RE = re.compile(r"(?:^|[\s,;.-]+)\bstop\b[\s.!?]*$", re.IGNORECASE)
-
+TRAILING_STOP_RE = re.compile(
+    r"[\s,;.-]+(?:that's\s+all|that\s+is\s+all|stop|bas|बस|ಸಾಕು)[\s.!?]*$",
+    re.IGNORECASE,
+)
 
 STOP_WORDS = {"stop", "that's all", "that is all", "bas", "बस", "ಸಾಕು"}
 
 
-def is_stop_command(text: Optional[str]) -> bool:
-    """Return True if text is a standalone stop command (e.g. for conversation mode)."""
+def is_exact_stop(text: Optional[str]) -> bool:
+    """Return True only if text is an EXACT match of a stop word after trimming punctuation and case."""
     if not text:
         return False
-    norm = text.strip().lower().rstrip(".!?")
+    norm = text.strip().lower().strip(" \t\n\r.!?,-;:\"'~`#")
     return norm in STOP_WORDS
 
 
+def is_stop_command(text: Optional[str]) -> bool:
+    """Backwards-compatible alias for is_exact_stop."""
+    return is_exact_stop(text)
+
+
+def has_trailing_stop(text: Optional[str]) -> bool:
+    """Return True if text ends with a trailing stop phrase (longer utterance)."""
+    if not text:
+        return False
+    t = text.strip()
+    if is_exact_stop(t):
+        return False
+    return bool(TRAILING_STOP_RE.search(t))
+
+
 def strip_trailing_stop(text: Optional[str]) -> str:
-    """Strip a trailing standalone 'stop' from transcript before planning."""
+    """Strip a trailing stop phrase or standalone stop word from text."""
     if not text:
         return ""
-    return STOP_TRAILING_RE.sub("", text.strip()).strip()
+    t = text.strip()
+    if is_exact_stop(t):
+        return ""
+    match = TRAILING_STOP_RE.search(t)
+    if match:
+        return t[:match.start()].strip(" \t\n\r,;.-")
+    return t
 
 
 def is_hint_echo(transcript: str, hint: Optional[str]) -> bool:
@@ -107,16 +130,16 @@ async def voice_turn(
                 "fallback": "text",
             })
 
-        user_text = strip_trailing_stop(stt_result.text)
+        raw_text = stt_result.text or ""
         detected_language = stt_result.language
         eff_lang = detected_language or "en"
 
-        # Client-side / server stop words for hands-free conversation mode
-        if is_stop_command(user_text) or is_stop_command(stt_result.text):
+        # 1. Exact stop command: triggers stop immediately with no task
+        if is_exact_stop(raw_text):
             stop_reply = "Okay, going idle."
             tts_res = await registry.synthesize(stop_reply, eff_lang)
             resp = {
-                "transcript": user_text,
+                "transcript": raw_text,
                 "reply_text": stop_reply,
                 "task_changes": [],
                 "language": eff_lang,
@@ -129,6 +152,10 @@ async def voice_turn(
                 resp["audio_base64"] = base64.b64encode(tts_res.audio_bytes).decode()
                 resp["audio_mime"] = tts_res.mime_type
             return JSONResponse(content=resp)
+
+        # 2. Check for trailing stop phrase in longer utterance
+        had_trailing_stop = has_trailing_stop(raw_text)
+        user_text = strip_trailing_stop(raw_text)
 
         # Treat empty or hint-echoed transcripts as unclear
         if not user_text.strip() or is_hint_echo(user_text, prompt_hint):
@@ -158,16 +185,18 @@ async def voice_turn(
             or get_pending_choice() is not None
             or bool(result.get("replan_preview"))
         )
-        expects_reply = bool(has_pending)
+        expects_reply = False if had_trailing_stop else bool(has_pending)
+        stopped = bool(had_trailing_stop)
 
         response = {
-            "transcript": user_text,
+            "transcript": raw_text,
             "reply_text": result["reply_text"],
             "task_changes": result["task_changes"],
             "language": final_lang,
             "tts_fallback": tts_result.use_browser_tts,
             "tts_provider_used": tts_result.provider,
             "expects_reply": expects_reply,
+            "stopped": stopped,
         }
 
         if not tts_result.use_browser_tts and tts_result.audio_bytes:
@@ -198,7 +227,8 @@ async def text_turn(
         from agent.lang import detect_language
         eff_lang = language if (language and language != "en") else detect_language(text, fallback="en")
 
-        if is_stop_command(text):
+        # 1. Exact stop command: triggers stop immediately with no task
+        if is_exact_stop(text):
             stop_reply = "Okay, going idle."
             tts_res = await registry.synthesize(stop_reply, eff_lang)
             resp = {
@@ -217,6 +247,8 @@ async def text_turn(
                 resp["audio_mime"] = tts_res.mime_type
             return JSONResponse(content=resp)
 
+        # 2. Check for trailing stop phrase in longer utterance
+        had_trailing_stop = has_trailing_stop(text)
         cleaned_text = strip_trailing_stop(text)
         if not cleaned_text.strip():
             return JSONResponse(content={
@@ -253,7 +285,8 @@ async def text_turn(
             or get_pending_choice(now=turn_now) is not None
             or bool(result.get("replan_preview"))
         )
-        expects_reply = bool(has_pending)
+        expects_reply = False if had_trailing_stop else bool(has_pending)
+        stopped = bool(had_trailing_stop)
 
         response = {
             "transcript": text,
@@ -264,6 +297,7 @@ async def text_turn(
             "tts_provider_used": tts_result.provider,
             "input_mode": "text",
             "expects_reply": expects_reply,
+            "stopped": stopped,
         }
 
         if not tts_result.use_browser_tts and tts_result.audio_bytes:

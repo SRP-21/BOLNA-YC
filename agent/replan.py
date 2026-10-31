@@ -61,8 +61,15 @@ def parse_confirmation_rule(text: str) -> Optional[str]:
         "beda", "bedave beda",
         "नहीं", "ना", "मत करो", "रहने दो", "छोड़ दो", "ಬೇಡ", "ಇಲ್ಲ"
     }
-    if any(t == n or t.startswith(n + " ") for n in no_words):
-        return "no"
+    for n in no_words:
+        if t == n:
+            return "no"
+        if n == "stop":
+            if t in {"stop it", "stop that", "stop please"}:
+                return "no"
+            continue
+        if t.startswith(n + " "):
+            return "no"
 
     return None
 

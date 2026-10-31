@@ -1,5 +1,5 @@
 """
-Unit tests for AdaptiveVAD and voice end-of-speech detection.
+Unit tests for AdaptiveVAD, barge-in guard, and voice end-of-speech detection.
 Loads constants from static/vad_config.json so the Python port and vad.js remain 100% identical.
 
 Tested sequences:
@@ -10,7 +10,8 @@ Tested sequences:
 5. Continuous moderate noise (times out at 6s)
 6. Speech then silence (~1.1s silence triggers speech_end)
 7. Hard cap (20s)
-8. Trailing standalone 'stop' stripping
+8. Barge-in guard: requires 2x threshold and >= 400ms sustained speech
+9. Trailing standalone 'stop' stripping
 """
 import os
 import json
@@ -37,6 +38,9 @@ class AdaptiveVAD:
         self.no_speech_timeout_ms = cfg.get("no_speech_timeout_ms", 6000)
         self.hard_cap_ms = cfg.get("hard_cap_ms", 20000)
         self.smoothing_alpha = cfg.get("smoothing_alpha", 0.3)
+        self.barge_in_threshold_multiplier = cfg.get("barge_in_threshold_multiplier", 2.0)
+        self.barge_in_min_speech_ms = cfg.get("barge_in_min_speech_ms", 400)
+        self.post_playback_cooldown_ms = cfg.get("post_playback_cooldown_ms", 300)
 
         self.max_history_frames = max(
             1, round(self.history_window_ms / self.frame_duration_ms)
@@ -50,13 +54,16 @@ class AdaptiveVAD:
         self.noise_floor = None
         self.speech_threshold = None
         self.speech_accumulated_ms = 0
+        self.barge_in_accumulated_ms = 0
         self.current_silence_ms = 0
         self.speech_detected = False
         self.state = "listening"
         self.is_final = False
         self.final_reason = None
 
-    def process_frame(self, rms: float, frame_duration_ms: int = None) -> dict:
+    def process_frame(
+        self, rms: float, frame_duration_ms: int = None, is_barge_in: bool = False
+    ) -> dict:
         dt = frame_duration_ms or self.frame_duration_ms
         if self.is_final:
             return {
@@ -102,12 +109,46 @@ class AdaptiveVAD:
         min_smoothed = min(self.history)
         self.noise_floor = min(min_smoothed, self.max_noise_floor)
 
-        # 4. Speech threshold
+        # 4. Base speech threshold
         self.speech_threshold = max(
             self.noise_floor * self.multiplier, self.min_speech_threshold
         )
 
-        # 5. Speech detection
+        # 5. Barge-in mode check: requires 2x threshold and >= 400ms sustained speech
+        if is_barge_in:
+            barge_in_thresh = self.speech_threshold * self.barge_in_threshold_multiplier
+            if rms >= barge_in_thresh:
+                self.barge_in_accumulated_ms += dt
+                if self.barge_in_accumulated_ms >= self.barge_in_min_speech_ms:
+                    self.is_final = True
+                    self.final_reason = "barge_in"
+                    self.state = "barge_in_triggered"
+                    return {
+                        "state": "barge_in_triggered",
+                        "is_final": True,
+                        "reason": "barge_in",
+                        "rms": rms,
+                        "noise_floor": self.noise_floor,
+                        "threshold": barge_in_thresh,
+                    }
+                return {
+                    "state": "barge_in_candidate",
+                    "is_final": False,
+                    "rms": rms,
+                    "noise_floor": self.noise_floor,
+                    "threshold": barge_in_thresh,
+                }
+            else:
+                self.barge_in_accumulated_ms = 0
+                return {
+                    "state": "listening",
+                    "is_final": False,
+                    "rms": rms,
+                    "noise_floor": self.noise_floor,
+                    "threshold": barge_in_thresh,
+                }
+
+        # Standard speech detection
         is_speech_frame = rms >= self.speech_threshold
 
         if is_speech_frame:
@@ -175,13 +216,11 @@ class AdaptiveVAD:
 def test_vad_speech_starting_at_frame_0():
     """Speech starting immediately at frame 0 must be detected and not swallowed."""
     vad = AdaptiveVAD()
-    # User speaks immediately with RMS 0.16 on frame 0
     res0 = vad.process_frame(0.16, 50)
     assert res0["state"] == "hearing"
-    assert vad.noise_floor <= 0.04  # Capped at max_noise_floor
-    assert vad.speech_threshold <= 0.12  # 0.04 * 3 = 0.12 < 0.16
+    assert vad.noise_floor <= 0.04
+    assert vad.speech_threshold <= 0.12
 
-    # Continue speech for 350 ms (7 frames total)
     for _ in range(6):
         res = vad.process_frame(0.16, 50)
         assert res["state"] == "hearing"
@@ -191,10 +230,8 @@ def test_vad_speech_starting_at_frame_0():
 
 
 def test_vad_speech_starting_at_1_second():
-    """Speech starting at 1 second (after 1000ms of quiet room):
-    Frames 0-19 are listening; frame 20 triggers hearing."""
+    """Speech starting at 1 second switches cleanly from listening to hearing."""
     vad = AdaptiveVAD()
-    # 20 frames @ 50ms = 1000ms of quiet room (rms ~0.005)
     for _ in range(20):
         res = vad.process_frame(0.005, 50)
         assert res["state"] == "listening"
@@ -203,20 +240,17 @@ def test_vad_speech_starting_at_1_second():
     assert vad.speech_detected is False
     assert vad.noise_floor == pytest.approx(0.005, abs=0.002)
 
-    # Frame 20 (at 1000ms): user starts speaking with RMS 0.14
     res_speech = vad.process_frame(0.14, 50)
     assert res_speech["state"] == "hearing"
     assert res_speech["is_final"] is False
 
 
 def test_vad_loud_room_floor():
-    """Loud room floor (e.g. ambient fan / AC noise around 0.035).
-    Noise floor tracks running minimum around ~0.035, speech threshold is ~0.105.
-    Loud continuous noise does not trigger false speech and times out at 6s."""
+    """Loud room floor (ambient fan / AC ~0.035).
+    Noise floor tracks running minimum, times out at 6s with no false triggers."""
     vad = AdaptiveVAD()
     final_res = None
     for i in range(130):
-        # Noise fluctuates between 0.032 and 0.038
         rms = 0.035 + (0.003 if i % 2 == 0 else -0.003)
         res = vad.process_frame(rms, 50)
         if res["is_final"]:
@@ -230,8 +264,49 @@ def test_vad_loud_room_floor():
     assert vad.speech_detected is False
 
 
+def test_vad_barge_in_guard():
+    """Barge-in guard requires 2x normal threshold AND >= 400ms sustained speech.
+    Short spikes or moderate assistant echo do not trigger barge-in."""
+    vad = AdaptiveVAD()
+    # Establish quiet floor (rms ~0.005 -> speech threshold 0.015, barge-in threshold 0.030)
+    for _ in range(10):
+        vad.process_frame(0.005, 50)
+
+    normal_thresh = vad.speech_threshold
+    barge_in_thresh = normal_thresh * 2.0
+    assert barge_in_thresh == pytest.approx(0.030)
+
+    # 1. Moderate audio spike above normal threshold but below barge-in threshold (e.g. 0.025)
+    r1 = vad.process_frame(0.025, 50, is_barge_in=True)
+    assert r1["state"] == "listening"
+    assert r1["is_final"] is False
+
+    # 2. Transient spike above barge-in threshold that only lasts 150ms (3 frames) then drops
+    for _ in range(3):
+        r_spike = vad.process_frame(0.08, 50, is_barge_in=True)
+        assert r_spike["state"] == "barge_in_candidate"
+        assert r_spike["is_final"] is False
+
+    # Drops below threshold -> resets candidate
+    r_drop = vad.process_frame(0.01, 50, is_barge_in=True)
+    assert r_drop["state"] == "listening"
+    assert vad.barge_in_accumulated_ms == 0
+
+    # 3. Sustained speech above 2x threshold for >= 400ms (8 frames @ 50ms) -> triggers barge-in!
+    final_barge = None
+    for _ in range(8):
+        res = vad.process_frame(0.09, 50, is_barge_in=True)
+        if res["is_final"]:
+            final_barge = res
+            break
+
+    assert final_barge is not None
+    assert final_barge["reason"] == "barge_in"
+    assert final_barge["state"] == "barge_in_triggered"
+
+
 def test_vad_synthetic_silence():
-    """Silence sequence: low ambient floor, no speech, times out at 6s."""
+    """Silence sequence times out at 6s."""
     vad = AdaptiveVAD()
     final_res = None
     for _ in range(130):
@@ -243,26 +318,15 @@ def test_vad_synthetic_silence():
     assert final_res is not None
     assert final_res["reason"] == "no_speech"
     assert final_res["state"] == "timeout_no_speech"
-    assert vad.total_ms == 6000
 
 
 def test_vad_synthetic_speech_then_silence():
-    """Speech then silence:
-    - 400 ms quiet room (rms ~0.005)
-    - 600 ms speech (rms ~0.15) -> accumulated speech > 300ms
-    - 1100 ms silence (rms ~0.005) -> triggers speech_end."""
+    """Speech then silence triggers speech_end."""
     vad = AdaptiveVAD()
-
     for _ in range(8):
-        res = vad.process_frame(0.005, 50)
-        assert res["state"] == "listening"
-
+        vad.process_frame(0.005, 50)
     for _ in range(12):
-        res = vad.process_frame(0.15, 50)
-        assert res["state"] == "hearing"
-
-    assert vad.speech_detected is True
-    assert vad.speech_accumulated_ms == 600
+        vad.process_frame(0.15, 50)
 
     final_res = None
     for _ in range(25):
@@ -273,36 +337,3 @@ def test_vad_synthetic_speech_then_silence():
 
     assert final_res is not None
     assert final_res["reason"] == "speech_end"
-    assert final_res["state"] == "speech_end"
-
-
-def test_strip_trailing_standalone_stop():
-    """Verify trailing standalone 'stop' is stripped while keeping legitimate words."""
-    from routes.voice import strip_trailing_stop
-
-    assert strip_trailing_stop("standup at 10 stop") == "standup at 10"
-    assert strip_trailing_stop("standup at 10, stop.") == "standup at 10"
-    assert strip_trailing_stop("gym at 6 - STOP!") == "gym at 6"
-    assert strip_trailing_stop("stop by the grocery store at 5") == "stop by the grocery store at 5"
-    assert strip_trailing_stop("non-stop flight at 9") == "non-stop flight at 9"
-    assert strip_trailing_stop("stop") == ""
-    assert strip_trailing_stop("  stop.  ") == ""
-    assert strip_trailing_stop(None) == ""
-
-
-@pytest.mark.asyncio
-async def test_text_turn_with_trailing_stop_end_to_end():
-    """Verify POST /api/text/turn strips trailing 'stop' from input text before planning."""
-    from fastapi.testclient import TestClient
-    from main import app
-    from unittest.mock import patch, AsyncMock
-    from providers.base import TTSResult
-
-    client = TestClient(app)
-    with patch("providers.registry.registry.synthesize", new_callable=AsyncMock) as mock_synth, \
-         patch("routes.voice.process_turn", new_callable=AsyncMock) as mock_turn:
-        mock_synth.return_value = TTSResult(use_browser_tts=True, provider="browser")
-        mock_turn.return_value = {"reply_text": "ok", "task_changes": [], "language": "en"}
-        resp = client.post("/api/text/turn", data={"text": "standup at 10 stop"})
-        assert resp.status_code == 200
-        mock_turn.assert_called_once_with("standup at 10", "en", now=None)

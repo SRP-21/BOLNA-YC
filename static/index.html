@@ -97,6 +97,12 @@
             <span>Hands-free: <strong id="hands-free-label">Off</strong></span>
           </button>
 
+          <!-- Interrupting Toggle -->
+          <button id="interrupting-btn" class="px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center space-x-1.5 transition shadow-sm" title="Allow interrupting assistant speech (barge-in)">
+            <span id="interrupting-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+            <span>Interrupting: <strong id="interrupting-label">Off</strong></span>
+          </button>
+
           <!-- Barge-in indicator / warning -->
           <span id="barge-in-badge" class="hidden px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800" title="Echo cancellation is inactive">
             <i class="fa-solid fa-headphones mr-1"></i>Use headphones for interrupting
@@ -479,6 +485,9 @@
     const handsFreeBtn = document.getElementById('hands-free-btn');
     const handsFreeDot = document.getElementById('hands-free-dot');
     const handsFreeLabel = document.getElementById('hands-free-label');
+    const interruptingBtn = document.getElementById('interrupting-btn');
+    const interruptingDot = document.getElementById('interrupting-dot');
+    const interruptingLabel = document.getElementById('interrupting-label');
     const bargeInBadge = document.getElementById('barge-in-badge');
     const micRipple = document.getElementById('mic-ripple');
     const micSpinner = document.getElementById('mic-spinner');
@@ -534,6 +543,36 @@
         handsFreeLabel.textContent = 'Off';
         handsFreeBtn.classList.remove('border-emerald-500', 'bg-emerald-50', 'dark:bg-emerald-950/30');
       }
+    }
+
+    // Interrupting (Barge-in) Toggle
+    let isInterruptingEnabled = false;
+    let interruptingManuallySet = false;
+
+    function toggleInterrupting(forceVal = null) {
+      if (forceVal !== null) {
+        isInterruptingEnabled = forceVal;
+      } else {
+        isInterruptingEnabled = !isInterruptingEnabled;
+        interruptingManuallySet = true;
+      }
+      if (interruptingDot && interruptingLabel && interruptingBtn) {
+        if (isInterruptingEnabled) {
+          interruptingDot.className = 'w-2 h-2 rounded-full bg-indigo-500 animate-pulse';
+          interruptingLabel.textContent = 'On';
+          interruptingBtn.classList.add('border-indigo-500', 'bg-indigo-50', 'dark:bg-indigo-950/30');
+        } else {
+          interruptingDot.className = 'w-2 h-2 rounded-full bg-slate-400';
+          interruptingLabel.textContent = 'Off';
+          interruptingBtn.classList.remove('border-indigo-500', 'bg-indigo-50', 'dark:bg-indigo-950/30');
+        }
+      }
+    }
+
+    if (interruptingBtn) {
+      interruptingBtn.addEventListener('click', () => {
+        toggleInterrupting();
+      });
     }
 
     // Client-side stop words via Web Speech Recognition (if supported)
@@ -915,8 +954,8 @@
         playPromise = speakText(data.reply_text, data.language || 'en');
       }
 
-      // Barge-in: if echoCancellation is active, listen for user speaking over assistant
-      if (isEchoCancellationActive) {
+      // Barge-in: if interrupting setting is on, listen for user speaking over assistant
+      if (isInterruptingEnabled) {
         startBargeInListener();
       }
 
@@ -926,7 +965,7 @@
     }
 
     function startBargeInListener() {
-      if (!isEchoCancellationActive || !audioContext || !analyserNode) return;
+      if (!isInterruptingEnabled || !audioContext || !analyserNode) return;
       const bData = new Float32Array(analyserNode.fftSize);
       bargeInIntervalId = setInterval(() => {
         if (!isSpeaking) return;
@@ -937,8 +976,8 @@
         }
         const rms = Math.sqrt(sumSquares / bData.length);
         if (!vadDetector) return;
-        const res = vadDetector.processFrame(rms, 50);
-        if (res.state === 'hearing') {
+        const res = vadDetector.processFrame(rms, 50, true);
+        if (res.isFinal && res.reason === 'barge_in') {
           // Barge-in! Stop playback immediately and capture user speech
           console.log('Barge-in: user interrupted playback');
           stopBargeInListener();
@@ -991,6 +1030,10 @@
         const track = stream.getAudioTracks()[0];
         const settings = track && track.getSettings ? track.getSettings() : {};
         isEchoCancellationActive = settings.echoCancellation === true;
+
+        if (!interruptingManuallySet) {
+          toggleInterrupting(isEchoCancellationActive);
+        }
 
         if (bargeInBadge) {
           if (!isEchoCancellationActive) {
@@ -1182,11 +1225,12 @@
         // Conversation mode auto-listening
         if (data.expects_reply || isHandsFree) {
           consecutiveNoSpeech = 0;
+          const cooldownMs = (vadConfig && vadConfig.post_playback_cooldown_ms) || 300;
           setTimeout(() => {
             if (!isRecording && !isSpeaking) {
               startRecording(false, Boolean(data.expects_reply));
             }
-          }, 350);
+          }, cooldownMs);
         } else {
           setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
         }
@@ -1217,11 +1261,12 @@
 
         if (data.expects_reply || isHandsFree) {
           consecutiveNoSpeech = 0;
+          const cooldownMs = (vadConfig && vadConfig.post_playback_cooldown_ms) || 300;
           setTimeout(() => {
             if (!isRecording && !isSpeaking) {
               startRecording(false, Boolean(data.expects_reply));
             }
-          }, 350);
+          }, cooldownMs);
         } else {
           setAgentState('idle', 'Ready when you are', 'Tap the mic and speak your day.');
         }

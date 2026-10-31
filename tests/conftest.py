@@ -32,3 +32,30 @@ def setup_test_db():
         assert current_size == _initial_planner_size, f"planner.db size changed during tests! {_initial_planner_size} -> {current_size}"
     # Cleanup temp directory
     shutil.rmtree(_test_dir, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def reset_db_state():
+    """Clean pending agent state and utterance history between tests to prevent cross-test pollution."""
+    from agent.pending_action import clear_pending_action
+    from agent.pending_choice import clear_pending_choice
+    from agent.replan import set_pending_plan
+    from db import SessionLocal, Utterance
+
+    clear_pending_action()
+    clear_pending_choice()
+    set_pending_plan(None)
+    session = SessionLocal()
+    session.query(Utterance).delete()
+    session.commit()
+    session.close()
+
+    yield
+
+    clear_pending_action()
+    clear_pending_choice()
+    set_pending_plan(None)
+    session = SessionLocal()
+    session.query(Utterance).delete()
+    session.commit()
+    session.close()
