@@ -22,11 +22,12 @@ logger = logging.getLogger(__name__)
 
 class ResolvedTime:
     def __init__(self, dt: datetime, needs_confirmation: bool = False,
-                 reasoning: str = "", source_phrase: str = ""):
+                 reasoning: str = "", source_phrase: str = "", is_fixed: bool = True):
         self.dt = dt
         self.needs_confirmation = needs_confirmation
         self.reasoning = reasoning
         self.source_phrase = source_phrase
+        self.is_fixed = is_fixed
 
     def to_dict(self):
         return {
@@ -34,6 +35,7 @@ class ResolvedTime:
             "needs_confirmation": self.needs_confirmation,
             "resolution_note": self.reasoning,
             "source_phrase": self.source_phrase,
+            "is_fixed": self.is_fixed,
         }
 
 
@@ -87,7 +89,8 @@ def resolve_time(
         return ResolvedTime(
             dt=resolved, needs_confirmation=False,
             reasoning=f"Relative: {amount} {unit} from now",
-            source_phrase=original_phrase
+            source_phrase=original_phrase,
+            is_fixed=True
         )
 
     # --- 2. Check for tomorrow / kal indicators ---
@@ -160,9 +163,13 @@ def resolve_time(
             resolved += timedelta(days=1)
             reasoning += "; pushed to tomorrow (was in past)"
 
+        is_approx = any(w in phrase_lower for w in ["around", "approx", "about", "lagbhag", "sumaru", "hathira", "samay", "kareeb", "karib"])
+        is_fixed = not is_approx
+
         return ResolvedTime(
             dt=resolved, needs_confirmation=needs_conf,
-            reasoning=reasoning, source_phrase=original_phrase
+            reasoning=reasoning, source_phrase=original_phrase,
+            is_fixed=is_fixed
         )
 
     # --- 4. Vague phrase lookup from config (sorted longest phrase first) ---
@@ -186,7 +193,8 @@ def resolve_time(
             return ResolvedTime(
                 dt=resolved, needs_confirmation=True,
                 reasoning=f"Vague phrase '{vague_phrase}' -> {h:02d}:{m:02d}{extra}",
-                source_phrase=original_phrase
+                source_phrase=original_phrase,
+                is_fixed=False
             )
 
     # --- 5. Fallback: couldn't parse, mark for confirmation ---
@@ -205,7 +213,8 @@ def resolve_time(
     return ResolvedTime(
         dt=resolved, needs_confirmation=True,
         reasoning=reasoning,
-        source_phrase=original_phrase
+        source_phrase=original_phrase,
+        is_fixed=False
     )
 
 

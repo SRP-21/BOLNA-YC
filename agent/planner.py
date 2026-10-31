@@ -116,6 +116,41 @@ async def process_turn(
         db.add(user_utt)
         db.commit()
 
+        # FIX D: Deterministic ambiguity check before LLM acts
+        from agent.matcher import find_task_by_title
+        from agent.replies import format_ambiguous
+        text_lower = user_text.lower().strip()
+        action_triggers = [
+            "cancel", "remove", "delete", "drop", "hata do", "hatao", "hata de",
+            "radd karo", "raddu madi", "snooze", "update", "move", "badal do",
+            "shift", "postpone", "aage badhao", "talli haaki"
+        ]
+        found_action = None
+        for act in action_triggers:
+            if act in text_lower:
+                found_action = act
+                break
+        if found_action:
+            target = text_lower.split(found_action, 1)[1].replace("the", "").replace("my", "").replace("karo", "").strip()
+            if not target:
+                target = text_lower.split(found_action, 1)[0].replace("the", "").replace("my", "").strip()
+            if target:
+                active_tasks = db.query(Task).filter(
+                    Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
+                ).all()
+                status, matched_task, candidates = find_task_by_title(db, target, active_tasks=active_tasks, cutoff=0.6, margin=0.1)
+                if status == "ambiguous":
+                    reply_text = format_ambiguous(candidates, language)
+                    agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+                    db.add(agent_utt)
+                    db.commit()
+                    log_event("agent_reply", reply_text)
+                    return {
+                        "reply_text": reply_text,
+                        "task_changes": [{"type": "ambiguous", "candidates": candidates}],
+                        "language": language,
+                    }
+
         # Build messages
         context = _get_context(db, now)
         recent_turns = _get_recent_turns(db, limit=4)
@@ -282,6 +317,9 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
         source_phrase=resolved.source_phrase,
         resolution_note=resolved.reasoning,
         language=language,
+        is_fixed=getattr(resolved, "is_fixed", True),
+        duration_minutes=args.get("duration_minutes"),
+        category=args.get("category"),
     )
     db.add(task)
     db.commit()
@@ -302,6 +340,9 @@ def _handle_add_task(db, args: dict, now: datetime, language: str, anchor_dt: Op
         "recurrence": recurrence,
         "needs_confirmation": resolved.needs_confirmation,
         "resolution_note": resolved.reasoning,
+        "is_fixed": task.is_fixed,
+        "duration_minutes": task.duration_minutes,
+        "category": task.category,
     }
 
 

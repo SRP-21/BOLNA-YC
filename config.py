@@ -95,10 +95,33 @@ class Settings(BaseSettings):
     reminder_stagger_seconds: int = 10
     overdue_policy: str = "fire_now"
 
+    # Replanning & Quiet Hours
+    quiet_hours_start: int = 22  # 22:00 (10 PM)
+    quiet_hours_end: int = 7     # 07:00 (7 AM)
+    day_end_hour: int = 21       # 21:30 (9:30 PM)
+    day_end_minute: int = 30
+    morning_window_hour: int = 9 # 09:00 (9 AM next day carryover)
+    morning_window_minute: int = 0
+    replan_min_gap_minutes: int = 15
+    default_task_duration_minutes: int = 30
+
+    # Nudges & Escalation
+    nudge_delay_1_seconds: int = 120  # 2 minutes
+    nudge_delay_2_seconds: int = 300  # 5 minutes
+    preference_snooze_threshold: int = 3
+    preference_cooldown_days: int = 14
+
+    # Evening Recap
+    recap_hour: int = 20         # 20:30 (8:30 PM)
+    recap_minute: int = 30
+
+    # Demo Data
+    enable_demo_data: bool = False
+
     # Usage limits
-    daily_token_limit: int = 100000
-    daily_stt_requests: int = 200
-    daily_tts_requests: int = 300
+    daily_token_limit: int = 1000000
+    daily_stt_requests: int = 1000
+    daily_tts_requests: int = 1000
 
 
 settings = Settings()

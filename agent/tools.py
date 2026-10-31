@@ -74,7 +74,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "task_id": {
-                        "type": "integer",
+                        "anyOf": [{"type": "integer"}, {"type": "null"}],
                         "description": "ID of the task to update"
                     },
                     "title": {
@@ -86,7 +86,6 @@ TOOLS = [
                         "description": "New time expression (optional)"
                     },
                 },
-                "required": ["task_id"],
             },
         },
     },
@@ -99,7 +98,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "task_id": {
-                        "type": "integer",
+                        "anyOf": [{"type": "integer"}, {"type": "null"}],
                         "description": "ID of the task to cancel (if known)"
                     },
                     "title": {

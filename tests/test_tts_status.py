@@ -66,7 +66,7 @@ async def test_edge_tts_mocked_success_gives_edge_provider():
 def test_text_turn_endpoint_tts_provider_used_browser():
     """Test /api/text/turn response when TTS fails soft to browser."""
     with patch.object(registry, "synthesize", new_callable=AsyncMock) as mock_synth, \
-         patch("agent.planner.process_turn", new_callable=AsyncMock) as mock_turn:
+         patch("routes.voice.process_turn", new_callable=AsyncMock) as mock_turn:
         
         mock_turn.return_value = {
             "reply_text": "Task noted.",
@@ -85,7 +85,7 @@ def test_text_turn_endpoint_tts_provider_used_browser():
 def test_text_turn_endpoint_tts_provider_used_edge():
     """Test /api/text/turn response when TTS succeeds with edge."""
     with patch.object(registry, "synthesize", new_callable=AsyncMock) as mock_synth, \
-         patch("agent.planner.process_turn", new_callable=AsyncMock) as mock_turn:
+         patch("routes.voice.process_turn", new_callable=AsyncMock) as mock_turn:
         
         mock_turn.return_value = {
             "reply_text": "Task noted.",

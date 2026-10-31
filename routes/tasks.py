@@ -46,6 +46,10 @@ async def list_tasks(include_cancelled: bool = False):
             "source_phrase": t.source_phrase,
             "snooze_count": t.snooze_count,
             "language": t.language,
+            "is_fixed": bool(t.is_fixed),
+            "duration_minutes": t.duration_minutes,
+            "category": t.category,
+            "is_synthetic": bool(t.is_synthetic),
             "created_at": t.created_at.isoformat() if t.created_at else None,
         } for t in tasks]
     finally:
@@ -55,8 +59,11 @@ async def list_tasks(include_cancelled: bool = False):
 @router.patch("/api/tasks/{task_id}")
 async def update_task(task_id: int, title: Optional[str] = Form(None),
                       due_at: Optional[str] = Form(None),
-                      status: Optional[str] = Form(None)):
-    """Update a task's title, time, or status."""
+                      status: Optional[str] = Form(None),
+                      duration_minutes: Optional[int] = Form(None),
+                      category: Optional[str] = Form(None),
+                      is_fixed: Optional[bool] = Form(None)):
+    """Update a task's title, time, status, duration, category, or flexibility."""
     db = SessionLocal()
     try:
         task = db.query(Task).filter_by(id=task_id).first()
@@ -73,6 +80,12 @@ async def update_task(task_id: int, title: Optional[str] = Form(None),
             task.status = status
             if status == TaskStatus.CANCELLED.value:
                 remove_task_job(task.id)
+        if duration_minutes is not None:
+            task.duration_minutes = duration_minutes
+        if category is not None:
+            task.category = category
+        if is_fixed is not None:
+            task.is_fixed = is_fixed
 
         task.needs_confirmation = False  # User confirmed by editing
         db.commit()

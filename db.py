@@ -60,6 +60,11 @@ class Task(Base):
     resolution_note = Column(Text, nullable=True)
     snooze_count = Column(Integer, default=0)
     language = Column(String, default="en")
+    is_fixed = Column(Boolean, default=False)
+    duration_minutes = Column(Integer, nullable=True)
+    category = Column(String, nullable=True)
+    is_synthetic = Column(Boolean, default=False)
+    nudge_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
@@ -96,8 +101,62 @@ class UsageCounter(Base):
     token_count = Column(Integer, default=0)
 
 
-def init_db():
-    Base.metadata.create_all(bind=engine)
+class ReplanSnapshot(Base):
+    """Snapshot of task state before/after replanning to support undo."""
+    __tablename__ = "replan_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ts = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    reason = Column(String, nullable=False)
+    before_state = Column(Text, nullable=False)  # JSON list of task snapshots
+    after_state = Column(Text, nullable=False)   # JSON list of task snapshots
+    undone = Column(Boolean, default=False)
+
+
+class LearnedPreference(Base):
+    """Learned user scheduling preferences (e.g. push gym by 20m)."""
+    __tablename__ = "learned_preferences"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category = Column(String, nullable=False)
+    offset_minutes = Column(Integer, nullable=False)
+    evidence_count = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    declined_until = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_synthetic = Column(Boolean, default=False)
+
+
+def migrate_db(target_engine=None):
+    """Migrate SQLite tables to add any missing columns without data loss."""
+    eng = target_engine or engine
+    with eng.connect() as conn:
+        # Check if tasks table exists
+        has_tasks = conn.exec_driver_sql(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tasks';"
+        ).scalar()
+        if has_tasks:
+            # Check existing columns in tasks table
+            cols_info = conn.exec_driver_sql("PRAGMA table_info(tasks);").fetchall()
+            existing_cols = {row[1] for row in cols_info}
+
+            new_columns = [
+                ("is_fixed", "BOOLEAN DEFAULT 0"),
+                ("duration_minutes", "INTEGER NULL"),
+                ("category", "VARCHAR NULL"),
+                ("is_synthetic", "BOOLEAN DEFAULT 0"),
+                ("nudge_count", "INTEGER DEFAULT 0"),
+            ]
+            for col_name, col_type in new_columns:
+                if col_name not in existing_cols:
+                    conn.exec_driver_sql(f"ALTER TABLE tasks ADD COLUMN {col_name} {col_type};")
+                    conn.commit()
+
+
+def init_db(target_engine=None):
+    eng = target_engine or engine
+    Base.metadata.create_all(bind=eng)
+    migrate_db(eng)
 
 
 def get_db() -> Session:
