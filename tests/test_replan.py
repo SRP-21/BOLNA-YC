@@ -42,7 +42,7 @@ def clean_tasks_and_snapshots():
 
 
 def test_mixed_fixed_and_flexible_shift():
-    """Fixed tasks stay in place; flexible tasks move on general shift."""
+    """In shift_all, an explicit command moves all active tasks including fixed ones. In shift_from, fixed tasks stay."""
     db = SessionLocal()
     # Fixed task: exact time standup at 10:30
     t_fixed = Task(
@@ -61,15 +61,19 @@ def test_mixed_fixed_and_flexible_shift():
     db.add_all([t_fixed, t_flex])
     db.commit()
 
-    intent = ReplanIntent(intent_type="shift_all", minutes=45)
-    plan = compute_replan(db, intent, now=FROZEN_NOW)
+    # 1. shift_all moves ALL active tasks (both Standup and Groceries)
+    intent_all = ReplanIntent(intent_type="shift_all", minutes=45)
+    plan_all = compute_replan(db, intent_all, now=FROZEN_NOW)
+    assert len(plan_all.changes) == 2
+    titles_moved = [c.title for c in plan_all.changes]
+    assert "Standup" in titles_moved
+    assert "Groceries" in titles_moved
 
-    # Only Groceries should be in plan.changes
-    assert len(plan.changes) == 1
-    c = plan.changes[0]
-    assert c.title == "Groceries"
-    assert c.old_due_at == datetime(2026, 10, 31, 11, 0, 0, tzinfo=IST)
-    assert c.new_due_at == datetime(2026, 10, 31, 11, 45, 0, tzinfo=IST)
+    # 2. shift_from protects fixed tasks; only flexible tasks move
+    intent_from = ReplanIntent(intent_type="shift_from", minutes=45, from_time=FROZEN_NOW)
+    plan_from = compute_replan(db, intent_from, now=FROZEN_NOW)
+    assert len(plan_from.changes) == 1
+    assert plan_from.changes[0].title == "Groceries"
     db.close()
 
 
@@ -302,3 +306,93 @@ async def test_voice_turn_replan_preview_and_confirm_flow():
     t_reverted = db.query(Task).filter_by(id=t_id).first()
     assert t_reverted.due_at == datetime(2026, 10, 31, 16, 0, 0)
     db.close()
+
+
+def test_spoken_preview_reports_skipped_tasks_en_hi_kn():
+    """Spoken preview must explicitly explain if any active task was left alone and why."""
+    db = SessionLocal()
+    # Task 1: in the past (09:00, while now is 10:00)
+    t_past = Task(
+        title="Breakfast",
+        due_at=datetime(2026, 10, 31, 9, 0, 0),
+        status=TaskStatus.SCHEDULED.value,
+        is_fixed=True,
+    )
+    # Task 2: in future (11:00)
+    t_future = Task(
+        title="Lunch Prep",
+        due_at=datetime(2026, 10, 31, 11, 0, 0),
+        status=TaskStatus.SCHEDULED.value,
+        is_fixed=True,
+    )
+    db.add_all([t_past, t_future])
+    db.commit()
+
+    intent = ReplanIntent(intent_type="shift_all", minutes=30)
+    plan = compute_replan(db, intent, now=FROZEN_NOW)
+
+    # 1. Lunch Prep moved, Breakfast skipped because past cutoff
+    assert len(plan.changes) == 1
+    assert plan.changes[0].title == "Lunch Prep"
+
+    # 2. English preview explains Breakfast was left alone
+    assert "I left Breakfast alone because it already passed." in plan.summary["en"]
+    assert "Lunch Prep to 11:30 AM" in plan.summary["en"]
+
+    # 3. Hindi preview explains Breakfast was left alone
+    assert "Breakfast का समय बीत चुका है इसलिए उसे नहीं बदला गया।" in plan.summary["hi"]
+    assert "Lunch Prep" in plan.summary["hi"]
+
+    # 4. Kannada preview explains Breakfast was left alone
+    assert "Breakfast ಸಮಯ ಈಗಾಗಲೇ ಮುಗಿದಿರುವುದರಿಂದ ಅದನ್ನು ಬದಲಾಯಿಸಿಲ್ಲ." in plan.summary["kn"]
+    assert "Lunch Prep" in plan.summary["kn"]
+
+    # 5. Fixed task left alone in shift_from
+    db.query(Task).delete()
+    t_fixed = Task(
+        title="Board Meeting",
+        due_at=datetime(2026, 10, 31, 11, 0, 0),
+        status=TaskStatus.SCHEDULED.value,
+        is_fixed=True,
+    )
+    t_flex = Task(
+        title="Jogging",
+        due_at=datetime(2026, 10, 31, 12, 0, 0),
+        status=TaskStatus.SCHEDULED.value,
+        is_fixed=False,
+    )
+    db.add_all([t_fixed, t_flex])
+    db.commit()
+
+    intent_from = ReplanIntent(intent_type="shift_from", minutes=30, from_time=FROZEN_NOW)
+    plan_from = compute_replan(db, intent_from, now=FROZEN_NOW)
+    assert len(plan_from.changes) == 1
+    assert plan_from.changes[0].title == "Jogging"
+    assert "I left Board Meeting alone because it has a fixed time." in plan_from.summary["en"]
+    assert "Board Meeting का निश्चित समय है इसलिए उसे नहीं बदला गया।" in plan_from.summary["hi"]
+    assert "Board Meeting ನಿಗದಿತ ಸಮಯದ್ದಾಗಿದೆ ಆದ್ದರಿಂದ ಅದನ್ನು ಬದಲಾಯಿಸಿಲ್ಲ." in plan_from.summary["kn"]
+    db.close()
+
+
+def test_native_replan_intent_rules_and_confirmation():
+    """Verify Hindi and Kannada replan utterances and native confirmations."""
+    # Hindi
+    i_hi = extract_replan_intent_rules("सब कुछ 30 मिनट आगे कर दो", FROZEN_NOW)
+    assert i_hi is not None
+    assert i_hi.intent_type == "shift_all"
+    assert i_hi.minutes == 30
+
+    # Kannada
+    i_kn = extract_replan_intent_rules("ಎಲ್ಲವನ್ನೂ 30 ನಿಮಿಷ ಮುಂದೆ ಹಾಕಿ", FROZEN_NOW)
+    assert i_kn is not None
+    assert i_kn.intent_type == "shift_all"
+    assert i_kn.minutes == 30
+
+    # Native confirmations
+    assert parse_confirmation_rule("हाँ") == "yes"
+    assert parse_confirmation_rule("हां") == "yes"
+    assert parse_confirmation_rule("ठीक है") == "yes"
+    assert parse_confirmation_rule("ಹೌದು") == "yes"
+    assert parse_confirmation_rule("ಸರಿ") == "yes"
+    assert parse_confirmation_rule("नहीं") == "no"
+    assert parse_confirmation_rule("ಬೇಡ") == "no"

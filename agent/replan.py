@@ -37,7 +37,7 @@ def parse_confirmation_rule(text: str) -> Optional[str]:
     Returns: 'yes' | 'no' | 'undo' | None
     """
     t = text.lower().strip()
-    t = re.sub(r"[^\w\s]", "", t).strip()
+    t = re.sub(r"[!?.,;:\'\"()\-]", "", t).strip()
 
     undo_words = {
         "undo", "undo that", "undo it", "wapas kar do", "wapas", "revert",
@@ -49,7 +49,8 @@ def parse_confirmation_rule(text: str) -> Optional[str]:
     yes_words = {
         "yes", "yeah", "yep", "sure", "okay", "ok", "do it", "go ahead",
         "ha", "haan", "theek hai", "chalega", "sahi hai",
-        "houdu", "sari", "maadi", "agide"
+        "houdu", "sari", "maadi", "agide",
+        "हाँ", "हां", "कर दो", "ठीक है", "हೌದು", "ಹೌದು", "ಸರಿ"
     }
     if any(t == y or t.startswith(y + " ") for y in yes_words):
         return "yes"
@@ -57,7 +58,8 @@ def parse_confirmation_rule(text: str) -> Optional[str]:
     no_words = {
         "no", "nope", "dont", "don't", "cancel that", "stop", "leave it",
         "nahi", "na", "mat karo", "rehne do", "chhod do",
-        "beda", "bedave beda"
+        "beda", "bedave beda",
+        "नहीं", "ना", "मत करो", "रहने दो", "छोड़ दो", "ಬೇಡ", "ಇಲ್ಲ"
     }
     if any(t == n or t.startswith(n + " ") for n in no_words):
         return "no"
@@ -69,7 +71,7 @@ REPLAN_KEYWORDS = [
     "push", "delay", "postpone", "replan", "reschedule", "free after",
     "swap", "skip the", "clear the", "sab kuch", "aage kar do",
     "aage badha", "shift all", "shift everything", "move gym to tomorrow",
-    "move "
+    "move ", "सब कुछ", "आगे कर", "आगे बढ़ा", "ಮುಂದೆ ಹಾಕು", "ಮುಂದೆ ತಳ್ಳಿ", "ಎಲ್ಲವನ್ನೂ", "ಎಲ್ಲವನ್ನು", "ಎಲ್ಲಾ", "ellavannu"
 ]
 
 
@@ -97,6 +99,12 @@ def extract_replan_intent_rules(text: str, now: datetime) -> Optional[ReplanInte
     if not shift_match:
         # Hinglish: "sab kuch 45 minute aage kar do"
         shift_match = re.search(r"sab\s*kuch\s+(\d+)\s*min(?:ute)?.*aage", t)
+    if not shift_match:
+        # Hindi Devanagari: "सब कुछ 30 मिनट आगे" / "सब 30 मिनट आगे बढ़ा दो"
+        shift_match = re.search(r"सब\s*(?:कुछ)?\s*(\d+)\s*मिनट.*(?:आगे|बढ़ा)", t)
+    if not shift_match:
+        # Kannada: "ಎಲ್ಲವನ್ನೂ 30 ನಿಮಿಷ ಮುಂದೆ" / "ಎಲ್ಲಾ 30 ನಿಮಿಷ ಮುಂದೆ" / "ellavannu 30 minute munde"
+        shift_match = re.search(r"(?:ಎಲ್ಲವನ್ನೂ|ಎಲ್ಲವನ್ನು|ಎಲ್ಲಾ|ellavannu)\s*(\d+)\s*(?:ನಿಮಿಷ|min|minute).*(?:ಮುಂದೆ|munde|ಹಾಕು|ತಳ್ಳಿ)", t)
 
     if shift_match:
         mins = int(shift_match.group(1))

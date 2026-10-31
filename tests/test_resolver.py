@@ -110,3 +110,74 @@ def test_recurrence_computation():
     assert next_monday.month == 11
     assert next_monday.hour == 10
 
+
+def test_native_script_kannada_and_hindi_resolution():
+    """
+    Regression tests for commit de739ad:
+    - 'ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ' resolves to tomorrow 17:00
+    - 'कल शाम 5 बजे' resolves to tomorrow 17:00
+    - 'कल सुबह 9 बजे' resolves to tomorrow 09:00
+    - 'ನಾಳೆ ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆಗೆ' resolves to tomorrow 09:00
+    """
+    # 1. Kannada: "ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ" -> tomorrow 17:00
+    res_kn_eve = resolve_time("ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ", now=FIXED_NOW)
+    assert res_kn_eve.dt.day == 31
+    assert res_kn_eve.dt.hour == 17
+    assert res_kn_eve.dt.minute == 0
+
+    # 2. Kannada: "ನಾಳೆ ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆಗೆ" -> tomorrow 09:00
+    res_kn_morn = resolve_time("ನಾಳೆ ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆಗೆ", now=FIXED_NOW)
+    assert res_kn_morn.dt.day == 31
+    assert res_kn_morn.dt.hour == 9
+    assert res_kn_morn.dt.minute == 0
+
+    # 3. Hindi: "कल शाम 5 बजे" -> tomorrow 17:00
+    res_hi_eve = resolve_time("कल शाम 5 बजे", now=FIXED_NOW)
+    assert res_hi_eve.dt.day == 31
+    assert res_hi_eve.dt.hour == 17
+    assert res_hi_eve.dt.minute == 0
+
+    # 4. Hindi: "कल सुबह 9 बजे" -> tomorrow 09:00
+    res_hi_morn = resolve_time("कल सुबह 9 बजे", now=FIXED_NOW)
+    assert res_hi_morn.dt.day == 31
+    assert res_hi_morn.dt.hour == 9
+    assert res_hi_morn.dt.minute == 0
+
+
+def test_context_enrichment_from_user_text():
+    """
+    Regression test for _handle_add_task context enrichment when LLM truncates
+    date/period indicators from time_phrase.
+    """
+    from db import init_db, SessionLocal, Task
+    from agent.planner import _handle_add_task
+    import os
+
+    init_db()
+    db = SessionLocal()
+    db.query(Task).delete()
+    db.commit()
+
+    try:
+        # Kannada: LLM only extracted "5 ಗಂಟೆಗೆ" but user_text has "ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ ಜಿಮ್ ಹೋಗಬೇಕು"
+        args_kn = {"title": "Gym", "time_phrase": "5 ಗಂಟೆಗೆ"}
+        created_kn = _handle_add_task(
+            db, args_kn, now=FIXED_NOW, language="kn",
+            user_text="ನಾಳೆ ಸಂಜೆ 5 ಗಂಟೆಗೆ ಜಿಮ್ ಹೋಗಬೇಕು"
+        )
+        task_kn = db.query(Task).filter_by(id=created_kn["task_id"]).first()
+        assert task_kn.due_at.day == 31
+        assert task_kn.due_at.hour == 17
+
+        # Hindi: LLM only extracted "5 बजे" but user_text has "कल शाम 5 बजे जिम जाना है"
+        args_hi = {"title": "Gym Hindi", "time_phrase": "5 बजे"}
+        created_hi = _handle_add_task(
+            db, args_hi, now=FIXED_NOW, language="hi",
+            user_text="कल शाम 5 बजे जिम जाना है"
+        )
+        task_hi = db.query(Task).filter_by(id=created_hi["task_id"]).first()
+        assert task_hi.due_at.day == 31
+        assert task_hi.due_at.hour == 17
+    finally:
+        db.close()
+

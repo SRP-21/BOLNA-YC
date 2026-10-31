@@ -135,6 +135,7 @@ def compute_replan(
         )
 
     changes: List[TaskChange] = []
+    skipped: List[Tuple[Task, str]] = []
     min_gap = timedelta(minutes=config.replan_min_gap_minutes)
     carryover_offset = 0
 
@@ -142,15 +143,19 @@ def compute_replan(
     if intent.intent_type in ("shift_all", "shift_from"):
         shift_delta = timedelta(minutes=intent.minutes or 45)
         cutoff_time = intent.from_time or now
+        is_shift_all = (intent.intent_type == "shift_all")
 
-        # Fixed tasks stay in place unless directly targeted; flexible tasks move
+        # In shift_all, all active tasks move (is_fixed does not protect against explicit shift command).
+        # In shift_from, fixed tasks stay in place.
         for t in active_tasks:
             t_due = ensure_ist(t.due_at)
             if t_due < cutoff_time:
+                skipped.append((t, "past"))
                 continue
 
-            if t.is_fixed:
-                # Fixed tasks do not move automatically on general shifts
+            if t.is_fixed and not is_shift_all:
+                # Fixed tasks do not move automatically on partial / shift_from shifts
+                skipped.append((t, "fixed"))
                 continue
 
             target_due = t_due + shift_delta
@@ -296,7 +301,7 @@ def compute_replan(
     )
 
     # Generate multi-language spoken summaries
-    summaries = _generate_plan_summary(changes, intent, language, now)
+    summaries = _generate_plan_summary(changes, intent, language, now, skipped=skipped)
 
     return ReplanPlan(
         intent=intent,
@@ -307,13 +312,67 @@ def compute_replan(
     )
 
 
-def _generate_plan_summary(changes: List[TaskChange], intent: ReplanIntent, language: str, now: datetime) -> Dict[str, str]:
+def _format_skipped_notice(skipped: List[Tuple[Task, str]], language: str) -> str:
+    """Format explanation for skipped tasks by reason in en, hi, kn."""
+    if not skipped:
+        return ""
+
+    past_titles = [t.title for t, r in skipped if r == "past"]
+    fixed_titles = [t.title for t, r in skipped if r == "fixed"]
+
+    parts = []
+    if language == "hi":
+        if past_titles:
+            t_str = ", ".join(past_titles)
+            verb = "उन्हें" if len(past_titles) > 1 else "उसे"
+            parts.append(f"{t_str} का समय बीत चुका है इसलिए {verb} नहीं बदला गया।")
+        if fixed_titles:
+            t_str = ", ".join(fixed_titles)
+            verb = "उन्हें" if len(fixed_titles) > 1 else "उसे"
+            parts.append(f"{t_str} का निश्चित समय है इसलिए {verb} नहीं बदला गया।")
+    elif language == "kn":
+        if past_titles:
+            t_str = ", ".join(past_titles)
+            pron = "ಅವುಗಳನ್ನು" if len(past_titles) > 1 else "ಅದನ್ನು"
+            parts.append(f"{t_str} ಸಮಯ ಈಗಾಗಲೇ ಮುಗಿದಿರುವುದರಿಂದ {pron} ಬದಲಾಯಿಸಿಲ್ಲ.")
+        if fixed_titles:
+            t_str = ", ".join(fixed_titles)
+            pron = "ಅವುಗಳನ್ನು" if len(fixed_titles) > 1 else "ಅದನ್ನು"
+            parts.append(f"{t_str} ನಿಗದಿತ ಸಮಯದ್ದಾಗಿದೆ ಆದ್ದರಿಂದ {pron} ಬದಲಾಯಿಸಿಲ್ಲ.")
+    else:  # English
+        if past_titles:
+            t_str = ", ".join(past_titles)
+            verb = "they already passed" if len(past_titles) > 1 else "it already passed"
+            parts.append(f"I left {t_str} alone because {verb}.")
+        if fixed_titles:
+            t_str = ", ".join(fixed_titles)
+            verb = "they have fixed times" if len(fixed_titles) > 1 else "it has a fixed time"
+            parts.append(f"I left {t_str} alone because {verb}.")
+
+    return " ".join(parts)
+
+
+def _generate_plan_summary(
+    changes: List[TaskChange],
+    intent: ReplanIntent,
+    language: str,
+    now: datetime,
+    skipped: Optional[List[Tuple[Task, str]]] = None,
+) -> Dict[str, str]:
     """Generate concise spoken summary in en, hi, kn."""
+    skipped = skipped or []
+    skip_en = _format_skipped_notice(skipped, "en")
+    skip_hi = _format_skipped_notice(skipped, "hi")
+    skip_kn = _format_skipped_notice(skipped, "kn")
+
     if not changes:
+        en_base = "No tasks needed to be moved."
+        hi_base = "किसी भी कार्य को बदलने की आवश्यकता नहीं पड़ी।"
+        kn_base = "ಯಾವುದೇ ಕಾರ್ಯಗಳನ್ನು ಬದಲಾಯಿಸುವ ಅಗತ್ಯವಿಲ್ಲ."
         return {
-            "en": "No tasks needed to be moved.",
-            "hi": "किसी भी कार्य को बदलने की आवश्यकता नहीं पड़ी।",
-            "kn": "ಯಾವುದೇ ಕಾರ್ಯಗಳನ್ನು ಬದಲಾಯಿಸುವ ಅಗತ್ಯವಿಲ್ಲ.",
+            "en": f"{en_base} {skip_en}".strip() if skip_en else en_base,
+            "hi": f"{hi_base} {skip_hi}".strip() if skip_hi else hi_base,
+            "kn": f"{kn_base} {skip_kn}".strip() if skip_kn else kn_base,
         }
 
     n = len(changes)
@@ -342,10 +401,14 @@ def _generate_plan_summary(changes: List[TaskChange], intent: ReplanIntent, lang
     item_str_hi = f"{n} रिमाइंडर" if n > 1 else "1 रिमाइंडर"
     item_str_kn = f"{n} ಕಾರ್ಯಗಳು" if n > 1 else "1 ಕಾರ್ಯ"
 
+    skip_suffix_en = f" {skip_en}" if skip_en else ""
+    skip_suffix_hi = f" {skip_hi}" if skip_hi else ""
+    skip_suffix_kn = f" {skip_kn}" if skip_kn else ""
+
     return {
-        "en": f"I'll move {item_str_en}: {preview_en}. Okay?",
-        "hi": f"मैं {item_str_hi} शिफ्ट कर दूंगा: {preview_hi}। ठीक है?",
-        "kn": f"ನಾನು {item_str_kn} ಬದಲಾಯಿಸುತ್ತೇನೆ: {preview_kn}. ಸರಿಯೇ?",
+        "en": f"I'll move {item_str_en}: {preview_en}.{skip_suffix_en} Okay?",
+        "hi": f"मैं {item_str_hi} शिफ्ट कर दूंगा: {preview_hi}।{skip_suffix_hi} ठीक है?",
+        "kn": f"ನಾನು {item_str_kn} ಬದಲಾಯಿಸುತ್ತೇನೆ: {preview_kn}.{skip_suffix_kn} ಸರಿಯೇ?",
     }
 
 
