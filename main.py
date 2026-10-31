@@ -16,6 +16,7 @@ from routes.tasks import router as tasks_router
 from routes.events_routes import router as events_router
 from routes.replan_routes import router as replan_router
 from routes.stats_routes import router as stats_router
+from routes.recap_routes import router as recap_router
 
 # Logging setup
 logging.basicConfig(
@@ -60,6 +61,7 @@ app.include_router(tasks_router)
 app.include_router(events_router)
 app.include_router(replan_router)
 app.include_router(stats_router)
+app.include_router(recap_router)
 
 # Static files
 app.mount("/static", StaticFiles(directory="static"), name="static")

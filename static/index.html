@@ -286,6 +286,94 @@
           </div>
         </div>
 
+        <!-- Today's Summary & 7-Day Trend Card -->
+        <div id="today-summary-card" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm flex flex-col space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div class="flex items-center space-x-2">
+              <i class="fa-solid fa-chart-pie text-indigo-500 text-sm"></i>
+              <h3 class="font-bold text-slate-800 dark:text-slate-200 text-sm">Today's Summary & Trends</h3>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span id="synthetic-badge" class="hidden px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 text-[10px] font-bold border border-amber-300 dark:border-amber-700">
+                ⚡ Synthetic Demo Data
+              </span>
+              <button id="recap-voice-btn" class="p-1 px-2.5 rounded-lg bg-indigo-50 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 text-xs font-medium hover:bg-indigo-100 transition" title="Trigger evening recap voice review">
+                <i class="fa-solid fa-moon mr-1"></i>Recap
+              </button>
+            </div>
+          </div>
+
+          <!-- Top row: Completion Ring & Quick Stats -->
+          <div class="grid grid-cols-3 gap-3 items-center">
+            <!-- Circular Progress Ring -->
+            <div class="flex flex-col items-center justify-center p-2 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+              <div class="relative w-16 h-16 flex items-center justify-center">
+                <svg class="w-16 h-16 transform -rotate-90" viewBox="0 0 36 36">
+                  <path class="text-slate-200 dark:text-slate-700" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                  <path id="completion-ring-path" class="text-indigo-600 dark:text-indigo-400 transition-all duration-500 ease-out" stroke-dasharray="0, 100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                </svg>
+                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                  <span id="completion-rate-text" class="text-xs font-bold text-slate-800 dark:text-slate-100">0%</span>
+                  <span class="text-[9px] text-slate-400">done</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stats Counts -->
+            <div class="col-span-2 grid grid-cols-3 gap-2 text-center">
+              <div class="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/50">
+                <span id="recap-done-count" class="text-base font-bold text-emerald-600 dark:text-emerald-400">0</span>
+                <p class="text-[10px] text-emerald-700 dark:text-emerald-300 font-medium">Done</p>
+              </div>
+              <div class="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/50">
+                <span id="recap-missed-count" class="text-base font-bold text-rose-600 dark:text-rose-400">0</span>
+                <p class="text-[10px] text-rose-700 dark:text-rose-300 font-medium">Missed</p>
+              </div>
+              <div class="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900/50">
+                <span id="recap-snooze-count" class="text-base font-bold text-amber-600 dark:text-amber-400">0</span>
+                <p class="text-[10px] text-amber-700 dark:text-amber-300 font-medium">Snoozed</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 7-Day Completion Trend Chart -->
+          <div class="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 flex flex-col space-y-1.5">
+            <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">7-Day Completion Trend</span>
+            <div id="trend-bars-container" class="flex items-end justify-between h-12 pt-2 px-1 gap-1">
+              <!-- Dynamically populated bars -->
+            </div>
+          </div>
+
+          <!-- Missed Tasks with Carry-over action -->
+          <div id="missed-tasks-section" class="hidden flex flex-col space-y-2 p-3 rounded-2xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-rose-800 dark:text-rose-300">Missed Today</span>
+              <button id="carryover-btn" class="py-1 px-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold transition shadow-sm flex items-center space-x-1">
+                <i class="fa-solid fa-arrow-right"></i>
+                <span>Carry to Tomorrow 9 AM</span>
+              </button>
+            </div>
+            <ul id="missed-tasks-list" class="space-y-1 text-xs text-slate-700 dark:text-slate-300">
+              <!-- Missed tasks injected here -->
+            </ul>
+          </div>
+
+          <!-- Learned Preferences & Demo Data Controls -->
+          <div class="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-col space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-700 dark:text-slate-300">Learned Preferences</span>
+              <div class="flex items-center space-x-1.5 text-[10px]">
+                <button id="dev-demo-btn" class="text-indigo-600 dark:text-indigo-400 hover:underline">Generate 1-Wk Demo Data</button>
+                <span>&bull;</span>
+                <button id="dev-clear-demo-btn" class="text-slate-400 hover:text-rose-500">Clear</button>
+              </div>
+            </div>
+            <div id="learned-prefs-container" class="space-y-1 text-xs">
+              <p class="text-slate-400 text-[11px] italic">No active learned preferences yet.</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Tasks List Card -->
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col">
           <div class="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
@@ -461,7 +549,10 @@
         const res = await fetch('/api/tasks');
         if (!res.ok) return;
         const tasks = await res.json();
+        window._currentTasks = tasks;
         renderTasks(tasks);
+        fetchRecap();
+        fetchLearnedPreferences();
       } catch (e) {
         console.error('Failed to fetch tasks', e);
       }
@@ -496,9 +587,20 @@
                   <i class="fa-solid fa-repeat mr-1 text-[8px]"></i>${escapeHtml(task.recurrence)}
                 </span>
               ` : ''}
+              ${task.category ? `
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 capitalize">
+                  ${escapeHtml(task.category)}
+                </span>
+              ` : ''}
+              ${task.is_synthetic ? `
+                <span class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200">
+                  demo
+                </span>
+              ` : ''}
             </div>
             <div class="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400 mt-1">
               <span><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${dueFormatted}</span>
+              ${task.duration_minutes ? `<span class="text-[10px] text-slate-400 font-mono">${task.duration_minutes}m</span>` : ''}
               <span class="capitalize text-[11px] font-medium px-2 py-0.5 rounded-full ${
                 task.status === 'due' ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 animate-pulse' :
                 task.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' :
@@ -1093,6 +1195,207 @@
         }
       } catch (err) {
         console.error('Undo error', err);
+      }
+    });
+
+    // --- Evening Recap & Behavior Stats Logic ---
+    async function fetchRecap() {
+      try {
+        const res = await fetch('/api/recap');
+        if (!res.ok) return;
+        const data = await res.json();
+        renderRecap(data);
+      } catch (err) {
+        console.error('Failed to fetch recap:', err);
+      }
+    }
+
+    function renderRecap(data) {
+      if (!data) return;
+      const rate = Math.round(data.completion_rate || 0);
+      const ringPath = document.getElementById('completion-ring-path');
+      const rateText = document.getElementById('completion-rate-text');
+      if (ringPath) ringPath.setAttribute('stroke-dasharray', `${rate}, 100`);
+      if (rateText) rateText.textContent = `${rate}%`;
+
+      const doneEl = document.getElementById('recap-done-count');
+      const missedEl = document.getElementById('recap-missed-count');
+      const snoozeEl = document.getElementById('recap-snooze-count');
+      if (doneEl) doneEl.textContent = data.done_count || 0;
+      if (missedEl) missedEl.textContent = data.missed_count || 0;
+      if (snoozeEl) snoozeEl.textContent = data.snoozed_count || 0;
+
+      const trendContainer = document.getElementById('trend-bars-container');
+      if (trendContainer && data.seven_day_trend) {
+        trendContainer.innerHTML = '';
+        data.seven_day_trend.forEach(d => {
+          const col = document.createElement('div');
+          col.className = 'flex flex-col items-center flex-1 h-full justify-end group relative';
+          const pct = Math.round(d.completion_rate || 0);
+          const hPx = Math.max(4, Math.round((pct / 100) * 32));
+          const barColor = pct >= 80 ? 'bg-emerald-500' : pct >= 50 ? 'bg-indigo-500' : pct > 0 ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700';
+
+          col.innerHTML = `
+            <div class="hidden group-hover:block absolute bottom-full mb-1 z-30 p-1.5 bg-slate-900 text-white text-[9px] rounded whitespace-nowrap shadow-md pointer-events-none">
+              ${d.weekday} (${d.date}): ${pct}% (${d.done}/${d.total})
+            </div>
+            <div class="w-full max-w-[14px] ${barColor} rounded-t transition-all duration-300" style="height: ${hPx}px;"></div>
+            <span class="text-[9px] text-slate-400 mt-1">${escapeHtml(d.weekday)}</span>
+          `;
+          trendContainer.appendChild(col);
+        });
+      }
+
+      const missedSection = document.getElementById('missed-tasks-section');
+      const missedList = document.getElementById('missed-tasks-list');
+      if (missedSection && missedList) {
+        if (data.missed_tasks && data.missed_tasks.length > 0) {
+          missedSection.classList.remove('hidden');
+          missedList.innerHTML = '';
+          data.missed_tasks.forEach(t => {
+            const li = document.createElement('li');
+            li.className = 'flex items-center justify-between py-0.5 border-b border-rose-100/50 dark:border-rose-900/30 last:border-0';
+            li.innerHTML = `
+              <div class="flex items-center space-x-1.5 truncate">
+                <i class="fa-solid fa-circle-xmark text-rose-500 text-[10px]"></i>
+                <span class="truncate font-medium">${escapeHtml(t.title)}</span>
+              </div>
+              <span class="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300">${escapeHtml(t.category || 'other')}</span>
+            `;
+            missedList.appendChild(li);
+          });
+        } else {
+          missedSection.classList.add('hidden');
+        }
+      }
+    }
+
+    async function fetchLearnedPreferences() {
+      try {
+        const res = await fetch('/api/preferences');
+        if (!res.ok) return;
+        const data = await res.json();
+        renderLearnedPreferences(data);
+      } catch (err) {
+        console.error('Failed to fetch preferences:', err);
+      }
+    }
+
+    function renderLearnedPreferences(data) {
+      const container = document.getElementById('learned-prefs-container');
+      const synthBadge = document.getElementById('synthetic-badge');
+      if (!container) return;
+
+      const active = data.active_preferences || [];
+      let hasSynthetic = active.some(p => p.is_synthetic);
+      if (window._currentTasks && window._currentTasks.some(t => t.is_synthetic)) {
+        hasSynthetic = true;
+      }
+
+      if (synthBadge) {
+        if (hasSynthetic) synthBadge.classList.remove('hidden');
+        else synthBadge.classList.add('hidden');
+      }
+
+      if (active.length === 0) {
+        container.innerHTML = '<p class="text-slate-400 text-[11px] italic">No active learned preferences yet.</p>';
+        return;
+      }
+
+      container.innerHTML = '';
+      active.forEach(pref => {
+        const item = document.createElement('div');
+        item.className = 'flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs';
+        const catIcons = {
+          health: 'fa-heart-pulse text-emerald-500',
+          work: 'fa-briefcase text-blue-500',
+          errands: 'fa-basket-shopping text-amber-500',
+          family: 'fa-house text-purple-500',
+          other: 'fa-circle-dot text-slate-400'
+        };
+        const iconClass = catIcons[pref.category] || catIcons.other;
+        const synthTag = pref.is_synthetic ? '<span class="ml-1 text-[9px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200">synth</span>' : '';
+
+        item.innerHTML = `
+          <div class="flex items-center space-x-2">
+            <i class="fa-solid ${iconClass}"></i>
+            <div>
+              <span class="font-semibold capitalize text-slate-800 dark:text-slate-100">${escapeHtml(pref.category)}</span>
+              ${synthTag}
+              <div class="text-[10px] text-slate-400">
+                Auto-shifts +${pref.offset_minutes}m (based on ${pref.evidence_count} snoozes)
+              </div>
+            </div>
+          </div>
+          <button onclick="resetPreference('${pref.category}')" class="p-1 px-2 text-[10px] text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 transition" title="Reset preference">
+            <i class="fa-solid fa-rotate-left mr-0.5"></i>Reset
+          </button>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    async function resetPreference(category) {
+      try {
+        const res = await fetch(`/api/preferences/${category}`, { method: 'DELETE' });
+        const data = await res.json();
+        appendBubble('agent', data.message || `Reset ${category} preference.`);
+        fetchLearnedPreferences();
+      } catch (err) {
+        console.error('Reset preference error:', err);
+      }
+    }
+
+    // Carryover button
+    document.getElementById('carryover-btn')?.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/recap/carryover', { method: 'POST' });
+        const data = await res.json();
+        appendBubble('agent', data.message || 'Missed tasks carried over to tomorrow 9 AM.');
+        fetchTasks();
+      } catch (err) {
+        console.error('Carryover error:', err);
+      }
+    });
+
+    // Demo Data buttons
+    document.getElementById('dev-demo-btn')?.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/dev/generate-demo-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force_enable: true })
+        });
+        const data = await res.json();
+        appendBubble('agent', `Generated 7-day realistic demo data (${data.tasks_created} tasks, ${data.preferences_created} preference).`);
+        fetchTasks();
+      } catch (err) {
+        console.error('Generate demo data error:', err);
+      }
+    });
+
+    document.getElementById('dev-clear-demo-btn')?.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/dev/clear-demo-data', { method: 'POST' });
+        const data = await res.json();
+        appendBubble('agent', `Cleared synthetic demo data (${data.tasks_deleted} tasks, ${data.preferences_deleted} preferences removed).`);
+        fetchTasks();
+      } catch (err) {
+        console.error('Clear demo data error:', err);
+      }
+    });
+
+    // Voice Recap button
+    document.getElementById('recap-voice-btn')?.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/recap');
+        const data = await res.json();
+        if (data.spoken_text) {
+          appendBubble('agent', data.spoken_text);
+          await speakAudioOrBrowser({ reply_text: data.spoken_text, language: 'en' });
+        }
+      } catch (err) {
+        console.error('Voice recap error:', err);
       }
     });
 

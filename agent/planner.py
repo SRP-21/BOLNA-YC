@@ -146,6 +146,43 @@ async def process_turn(
             log_event("agent_reply", reply_text)
             return {"reply_text": reply_text, "task_changes": [], "language": language}
 
+        # Check evening recap command ("end my day", "aaj ka recap", "wrap up", etc.)
+        from agent.recap import is_recap_command, build_evening_recap, apply_carryover_to_tomorrow
+        if is_recap_command(user_text):
+            recap_data = build_evening_recap(db, now=now, language=language)
+            reply_text = recap_data["spoken_text"]
+            agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+            db.add(agent_utt)
+            db.commit()
+            log_event("agent_reply", reply_text)
+            return {
+                "reply_text": reply_text,
+                "task_changes": [],
+                "recap": recap_data,
+                "language": language,
+            }
+
+        # Check if previous turn was recap offering carryover and user said yes
+        last_turn = db.query(Utterance).filter_by(role="assistant").order_by(Utterance.id.desc()).first()
+        if last_turn and ("tomorrow morning" in last_turn.text.lower() or "कल सुबह" in last_turn.text or "ನಾಳೆ ಬೆಳಿಗ್ಗೆ" in last_turn.text):
+            if conf_rule == "yes":
+                res = apply_carryover_to_tomorrow(db, now=now)
+                if language == "hi":
+                    reply_text = f"छूटे हुए {res['carried_count']} कार्यों को कल सुबह शिफ्ट कर दिया गया है।"
+                elif language == "kn":
+                    reply_text = f"ತಪ್ಪಿದ {res['carried_count']} ಕಾರ್ಯಗಳನ್ನು ನಾಳೆ ಬೆಳಿಗ್ಗೆ ಸರಿಸಲಾಗಿದೆ."
+                else:
+                    reply_text = f"Moved {res['carried_count']} missed tasks to tomorrow morning."
+                agent_utt = Utterance(role="assistant", text=reply_text, language=language)
+                db.add(agent_utt)
+                db.commit()
+                log_event("agent_reply", reply_text)
+                return {
+                    "reply_text": reply_text,
+                    "task_changes": res.get("carried_tasks", []),
+                    "language": language,
+                }
+
         # Check pending replan confirmation (yes / no)
         pending_plan = get_pending_plan()
         if pending_plan and conf_rule in ("yes", "no"):
