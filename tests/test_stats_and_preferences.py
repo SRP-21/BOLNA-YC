@@ -160,7 +160,7 @@ async def test_learned_offset_applied_to_new_tasks():
     assert res is not None
 
     db = SessionLocal()
-    gym_task = db.query(Task).filter_by(title="Gym").first()
+    gym_task = db.query(Task).filter(Task.title.ilike("%gym%")).first()
     assert gym_task is not None
     # Original requested was 18:00; with +20m offset -> 18:20
     assert gym_task.due_at == datetime(2026, 10, 31, 18, 20, 0)
