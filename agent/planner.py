@@ -233,13 +233,74 @@ async def process_turn(
                     "language": language,
                 }
 
+        # Check pending choice state (ambiguity follow-up)
+        from agent.pending_choice import (
+            get_pending_choice, clear_pending_choice, set_pending_choice, resolve_candidate_choice
+        )
+        pending_ch = get_pending_choice(now=now)
+        if pending_ch:
+            chosen_task = resolve_candidate_choice(db, user_text, pending_ch.candidate_task_ids, language)
+            if chosen_task:
+                resp_lang = language if language != "en" else (pending_ch.language or "en")
+                clear_pending_choice()
+                if pending_ch.action == "cancel":
+                    if chosen_task.status == TaskStatus.CANCELLED.value:
+                        from agent.replies import format_already_cancelled
+                        reply_text = format_already_cancelled(chosen_task.title, resp_lang)
+                        changes = []
+                    elif chosen_task.status == TaskStatus.DONE.value:
+                        from agent.replies import format_already_done
+                        reply_text = format_already_done(chosen_task.title, resp_lang)
+                        changes = []
+                    else:
+                        chosen_task.status = TaskStatus.CANCELLED.value
+                        db.commit()
+                        from scheduler import remove_task_job
+                        remove_task_job(chosen_task.id)
+                        log_event("task_cancelled", f"Cancelled: {chosen_task.title}", task_id=chosen_task.id)
+                        from agent.replies import format_cancelled
+                        reply_text = format_cancelled(chosen_task.title, resp_lang)
+                        changes = [{"type": "cancelled", "title": chosen_task.title}]
+                elif pending_ch.action == "done":
+                    chosen_task.status = TaskStatus.DONE.value
+                    db.commit()
+                    from scheduler import remove_task_job
+                    remove_task_job(chosen_task.id)
+                    log_event("task_done", f"Done: {chosen_task.title}", task_id=chosen_task.id)
+                    from agent.replies import format_done
+                    reply_text = format_done(chosen_task.title, resp_lang)
+                    changes = [{"type": "done", "title": chosen_task.title}]
+                else:
+                    reply_text = "Updated."
+                    changes = []
+
+                agent_utt = Utterance(role="assistant", text=reply_text, language=resp_lang)
+                db.add(agent_utt)
+                db.commit()
+                log_event("agent_reply", reply_text)
+                return {"reply_text": reply_text, "task_changes": changes, "language": resp_lang}
+            else:
+                # ANY other utterance clears the pending choice state and is processed normally
+                clear_pending_choice()
+
         # Check pending single-task confirmation state
         from agent.pending_action import get_pending_action, clear_pending_action, set_pending_action, PendingAction
         pending_act = get_pending_action(now=now)
+        pending_plan = get_pending_plan()
+
+        # Deterministic precedence between replan preview and single-task confirmation:
+        # The newest question wins!
+        if pending_act and pending_plan:
+            plan_created = getattr(pending_plan, "created_at", None) or pending_act.created_at
+            if plan_created >= pending_act.created_at:
+                pending_act = None
+            else:
+                pending_plan = None
 
         YES_WORDS = {
             "yes", "yeah", "yep", "ok", "okay", "do it", "go ahead",
-            "haan", "ha", "हाँ", "हां", "कर दो", "ठीक है", "ಹೌದು", "ಸರಿ"
+            "haan", "ha", "हाँ", "हां", "कर दो", "ठीक है",
+            "houdu", "sari", "maadi", "agide", "aaytu", "aayithu", "ಆಯಿತು", "ಹೌದು", "ಸರಿ"
         }
         NO_WORDS = {
             "no", "dont", "don't", "nahi", "nahin", "नहीं", "ना", "ಬೇಡ", "ಇಲ್ಲ"
@@ -293,7 +354,6 @@ async def process_turn(
                 clear_pending_action()
 
         # Check pending replan confirmation (yes / no)
-        pending_plan = get_pending_plan()
         if pending_plan and conf_rule in ("yes", "no"):
             if conf_rule == "yes":
                 apply_replan_commit(db, pending_plan, reason=pending_plan.reason)
@@ -320,9 +380,9 @@ async def process_turn(
             return {"reply_text": reply_text, "task_changes": [], "language": language}
 
         # If neither pending_act nor pending_plan exists:
-        # Expired or missing state: a bare "yes" gets a short "Yes to what? I don't have a pending question." reply and changes nothing
+        # Expired or missing state: a bare "yes" / "okay" / "ठीक है" / "ಆಯಿತು" gets a short reply and changes nothing
         if not pending_act and not pending_plan:
-            if text_clean in YES_WORDS:
+            if is_yes:
                 from agent.replies import format_yes_to_what_no_pending
                 reply_text = format_yes_to_what_no_pending(language)
                 agent_utt = Utterance(role="assistant", text=reply_text, language=language)
@@ -392,6 +452,30 @@ async def process_turn(
                 ).all()
                 status, matched_task, candidates = find_task_by_title(db, target, active_tasks=active_tasks, cutoff=0.6, margin=0.1)
                 if status == "ambiguous":
+                    act_type = "cancel"
+                    for act_word in AMBIGUITY_ACTION_TRIGGERS:
+                        if act_word in text_lower:
+                            if any(act_word.startswith(c) or act_word == c for c in ["cancel", "remove", "delete", "drop", "scrap", "hata", "radd", "हटा", "रद्द", "कैंसिल", "raddu", "tegedu", "ರದ್ದು", "ತೆಗೆ"]):
+                                act_type = "cancel"
+                            elif any(act_word.startswith(d) or act_word == d for d in ["mark done", "done", "finished", "complete", "finish", "ho gaya", "khatam", "pura", "kar diya", "हो गया", "पूरा", "खत्म", "mugiyithu", "aayithu", "aagide", "ಮುಗಿಯಿತು", "ಆಯಿತು", "ಮುಗಿದಿದೆ"]):
+                                act_type = "done"
+                            elif "snooze" in act_word or "स्नूज़" in act_word or "ಸ್ನೂಜ್" in act_word:
+                                act_type = "snooze"
+                            else:
+                                act_type = "move"
+                            break
+
+                    cand_tasks = [t for t in active_tasks if t.title in candidates]
+                    cand_ids = [t.id for t in cand_tasks]
+                    from agent.pending_choice import set_pending_choice, PendingChoice
+                    ref_now = ensure_ist(now) if now is not None else now_ist()
+                    set_pending_choice(PendingChoice(
+                        action=act_type,
+                        candidate_task_ids=cand_ids,
+                        language=language,
+                        created_at=ref_now,
+                    ))
+
                     reply_text = format_ambiguous(candidates, language)
                     agent_utt = Utterance(role="assistant", text=reply_text, language=language)
                     db.add(agent_utt)
@@ -747,12 +831,46 @@ def _handle_cancel_task(db, args: dict, user_text: str = "", language: str = "en
     if target_title:
         status, task, candidates = find_task_by_title(db, target_title, active_tasks=active_tasks, cutoff=0.6, margin=0.1)
         if status == "ambiguous":
+            cand_tasks = [t for t in active_tasks if t.title in candidates]
+            cand_ids = [t.id for t in cand_tasks]
+            from agent.pending_choice import set_pending_choice, PendingChoice
+            ref_now = ensure_ist(now) if now is not None else now_ist()
+            set_pending_choice(PendingChoice(
+                action="cancel",
+                candidate_task_ids=cand_ids,
+                language=language,
+                created_at=ref_now,
+            ))
             return {
                 "type": "cancel_ambiguous",
                 "target": target_title,
                 "candidates": candidates,
             }
         elif status == "not_found":
+            # Fix for (b): When command word is explicit and title matcher finds nothing,
+            # use task_id from LLM tool call if it points to an active task, ask "Should I cancel <title>?" and set pending state.
+            fallback_task = None
+            if has_cmd and task_id:
+                try:
+                    fallback_task = db.query(Task).filter(
+                        Task.id == int(task_id),
+                        Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
+                    ).first()
+                except (ValueError, TypeError):
+                    fallback_task = None
+            if fallback_task:
+                ref_now = ensure_ist(now) if now is not None else now_ist()
+                set_pending_action(PendingAction(
+                    action="cancel",
+                    task_id=fallback_task.id,
+                    title=fallback_task.title,
+                    language=language,
+                    created_at=ref_now,
+                ))
+                return {
+                    "type": "destructive_confirm_prompt",
+                    "title": fallback_task.title,
+                }
             return {
                 "type": "cancel_not_found",
                 "target": target_title,

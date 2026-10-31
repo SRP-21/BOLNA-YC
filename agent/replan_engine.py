@@ -61,6 +61,7 @@ class ReplanPlan:
     conflicts: List[Conflict] = field(default_factory=list)
     summary: Dict[str, str] = field(default_factory=dict)
     reason: str = ""
+    created_at: datetime = field(default_factory=now_ist)
 
     def to_dict(self):
         return {
