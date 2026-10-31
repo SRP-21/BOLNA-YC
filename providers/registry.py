@@ -68,10 +68,11 @@ class ProviderRegistry:
         return self._fallback_info
 
     async def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/webm",
-                         language_hint: Optional[str] = None):
+                         language_hint: Optional[str] = None,
+                         prompt: Optional[str] = None):
         """STT with fallback chain."""
         try:
-            result = await self._stt_primary.transcribe(audio_bytes, mime_type, language_hint)
+            result = await self._stt_primary.transcribe(audio_bytes, mime_type, language_hint, prompt=prompt)
             self._fallback_info = None
             return result
         except Exception as e:
@@ -79,7 +80,7 @@ class ProviderRegistry:
             if self._stt_fallback:
                 self._fallback_info = f"STT: using fallback ({e})"
                 self._active_stt = "groq_whisper (fallback)"
-                return await self._stt_fallback.transcribe(audio_bytes, mime_type, language_hint)
+                return await self._stt_fallback.transcribe(audio_bytes, mime_type, language_hint, prompt=prompt)
             raise
 
     async def synthesize(self, text: str, language: str = "en"):

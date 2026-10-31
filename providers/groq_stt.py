@@ -30,7 +30,8 @@ class GroqSTT(STTProvider):
 
     async def transcribe(
         self, audio_bytes: bytes, mime_type: str = "audio/webm",
-        language_hint: Optional[str] = None
+        language_hint: Optional[str] = None,
+        prompt: Optional[str] = None,
     ) -> STTResult:
         if not usage.check_limit("groq_stt"):
             raise RuntimeError("Daily STT request limit reached")
@@ -52,6 +53,8 @@ class GroqSTT(STTProvider):
         # Language hint improves accuracy for known languages
         if language_hint and language_hint in ("en", "hi", "kn"):
             kwargs["language"] = language_hint
+        if prompt:
+            kwargs["prompt"] = prompt
 
         try:
             response = await self.client.audio.transcriptions.create(**kwargs)

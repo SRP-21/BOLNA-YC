@@ -27,7 +27,8 @@ SARVAM_TTS_LANG_MAP = {
 class SarvamSTT(STTProvider):
     async def transcribe(
         self, audio_bytes: bytes, mime_type: str = "audio/webm",
-        language_hint: Optional[str] = None
+        language_hint: Optional[str] = None,
+        prompt: Optional[str] = None,
     ) -> STTResult:
         if not settings.sarvam_enabled:
             raise RuntimeError("Sarvam not enabled")

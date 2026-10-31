@@ -355,10 +355,20 @@ def _handle_cancel_task(db, args: dict) -> dict:
         task = None
 
     if not task and target_title:
+        # 1. Exact or substring match (case-insensitive, in either direction)
         for t in active_tasks:
-            if target_title.lower() == t.title.lower() or target_title.lower() in t.title.lower():
+            t_low = t.title.lower()
+            tgt_low = target_title.lower()
+            if tgt_low == t_low or tgt_low in t_low or t_low in tgt_low:
                 task = t
                 break
+
+    if not task and target_title and active_tasks:
+        # 2. Fuzzy match with difflib (cutoff 0.5 to catch phonetic distortions like 'mona search' -> 'Mohan Aswar')
+        title_map = {t.title.lower(): t for t in active_tasks}
+        matches = difflib.get_close_matches(target_title.lower(), list(title_map.keys()), n=1, cutoff=0.5)
+        if matches:
+            task = title_map[matches[0]]
 
     if not task:
         candidates = [t.title for t in active_tasks]

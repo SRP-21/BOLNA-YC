@@ -23,7 +23,8 @@ class STTProvider(ABC):
     @abstractmethod
     async def transcribe(
         self, audio_bytes: bytes, mime_type: str = "audio/webm",
-        language_hint: Optional[str] = None
+        language_hint: Optional[str] = None,
+        prompt: Optional[str] = None,
     ) -> STTResult:
         ...
 

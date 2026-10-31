@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 from agent.planner import process_turn
 from providers.registry import registry
+from db import SessionLocal, Task, TaskStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -28,9 +29,23 @@ async def voice_turn(
         audio_bytes = await audio.read()
         mime_type = audio.content_type or "audio/webm"
 
-        # STT
+        # STT (prime Whisper with active task titles for proper nouns)
+        prompt_hint = None
+        db = SessionLocal()
         try:
-            stt_result = await registry.transcribe(audio_bytes, mime_type, language_hint)
+            active = db.query(Task).filter(
+                Task.status.in_([TaskStatus.SCHEDULED.value, TaskStatus.SNOOZED.value, TaskStatus.DUE.value])
+            ).all()
+            titles = [t.title for t in active if t.title]
+            if titles:
+                prompt_hint = f"Reminders: {', '.join(titles)}"
+        finally:
+            db.close()
+
+        try:
+            stt_result = await registry.transcribe(
+                audio_bytes, mime_type, language_hint, prompt=prompt_hint
+            )
         except Exception as e:
             logger.error(f"STT failed: {e}")
             return JSONResponse(status_code=500, content={
