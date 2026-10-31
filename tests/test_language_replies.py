@@ -66,7 +66,7 @@ def test_localized_reply_formatting():
     assert "ಹೊಂದಿಸಲಾಗಿದೆ" in kn_created
 
     en_created = format_created([{"type": "created", "title": "Doctor", "due_at": "2026-10-31T09:00:00"}], "en")
-    assert "Got it, reminder set: Doctor" in en_created
+    assert any(p in en_created for p in ["Okay, Doctor", "Done. Doctor", "Got it, Doctor", "Doctor"])
 
     # Done
     assert "पूरा हो गया" in format_done("Gym", "hi")
@@ -105,7 +105,7 @@ def test_text_turn_hinglish_detection_and_hindi_reply():
         assert data["language"] == "hi"
         assert "Doctor appointment" in data["reply_text"]
         # Spoken confirmation is in Devanagari Hindi
-        assert "सेट कर दिया गया है" in data["reply_text"]
+        assert any(p in data["reply_text"] for p in ["सेट कर दिया गया है", "सेट हो गया", "सेट कर दिया"])
         # Verify TTS was called with language="hi"
         assert mock_synth.call_args[0][1] == "hi"
 

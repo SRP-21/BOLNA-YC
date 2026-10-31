@@ -85,25 +85,118 @@ REPLIES = {
 }
 
 
+_variant_counter = 0
+
+
+def next_variant_index(modulo: int = 3) -> int:
+    """Return deterministic variant index rotating across calls."""
+    global _variant_counter
+    idx = _variant_counter % modulo
+    _variant_counter += 1
+    return idx
+
+
+def reset_variant_counter():
+    """Reset rotating variant counter (primarily for test repeatability)."""
+    global _variant_counter
+    _variant_counter = 0
+
+
+CREATED_SINGLE_VARIANTS = {
+    "en": [
+        "Okay, {title} {time_phrase}.",
+        "Done. {title}, {time}.",
+        "Got it, {title} {time_phrase}.",
+    ],
+    "hi": [
+        "ठीक है, {title} का रिमाइंडर {time} सेट कर दिया गया है।",
+        "हो गया, {title} {time} सेट कर दिया गया है।",
+        "समझ गया, {title} {time} सेट हो गया।",
+    ],
+    "kn": [
+        "ಸರಿ, {title} ರಿಮೈಂಡರ್ ಅನ್ನು {time} ಹೊಂದಿಸಲಾಗಿದೆ.",
+        "ಆಯಿತು, {title} {time} ಹೊಂದಿಸಲಾಗಿದೆ.",
+        "ಖಚಿತ, {title} {time} ಹೊಂದಿಸಲಾಗಿದೆ.",
+    ],
+}
+
+NEEDS_CONF_GUESS_VARIANTS = {
+    "en": [
+        "I set {title} for {time}. Tell me if you want a different time.",
+        "{title} set for {time}. Let me know if that works.",
+        "Got it, {title} set for {time}. Tell me if you want another time.",
+    ],
+    "hi": [
+        "{title} को {time} सेट किया है। अगर दूसरा समय चाहिए तो बताइए।",
+        "{title} {time} सेट किया है। दूसरा समय चाहिए तो बताएँ।",
+        "{title} को {time} सेट किया है। कोई और समय चाहिए तो बताइए।",
+    ],
+    "kn": [
+        "{title} ಅನ್ನು {time} ಹೊಂದಿಸಿದ್ದೇನೆ. ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ತಿಳಿಸಿ.",
+        "{title} ಅನ್ನು {time} ನಿಗದಿಪಡಿಸಲಾಗಿದೆ. ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ಹೇಳಿ.",
+        "{title} {time} ಹೊಂದಿಸಲಾಗಿದೆ. ಬೇರೆ ಸಮಯ ಬೇಕಿದ್ದರೆ ತಿಳಿಸಿ.",
+    ],
+}
+
+CREATED_MULTIPLE_VARIANTS = {
+    "en": [
+        "Okay, {count} reminders set.",
+        "Done, {count} reminders set.",
+        "Got it, {count} reminders set.",
+    ],
+    "hi": [
+        "ठीक है, {count} रिमाइंडर सेट कर दिए गए हैं।",
+        "हो गया, {count} रिमाइंडर सेट हो गए।",
+        "समझ गया, {count} रिमाइंडर सेट कर दिए।",
+    ],
+    "kn": [
+        "ಸರಿ, {count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಲಾಗಿದೆ.",
+        "ಆಯಿತು, {count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಲಾಗಿದೆ.",
+        "ಖಚಿತ, {count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಹೊಂದಿಸಲಾಗಿದೆ.",
+    ],
+}
+
+UPDATED_VARIANTS = {
+    "en": [
+        "Moved {title} to {time}.",
+        "Okay, moved {title} to {time}.",
+        "Done. {title} moved to {time}.",
+    ],
+    "hi": [
+        "{title} को {time} शिफ्ट कर दिया गया है।",
+        "ठीक है, {title} को {time} शिफ्ट कर दिया।",
+        "हो गया, {title} को {time} कर दिया।",
+    ],
+    "kn": [
+        "{title} ಅನ್ನು {time} ಬದಲಾಯಿಸಲಾಗಿದೆ.",
+        "ಸರಿ, {title} ಅನ್ನು {time} ಬದಲಾಯಿಸಲಾಗಿದೆ.",
+        "ಆಯಿತು, {title} ಅನ್ನು {time} ಮಾಡಲಾಗಿದೆ.",
+    ],
+}
+
+
+def _format_time_phrase(when_str: str, language: str) -> str:
+    """Helper to attach 'at' or 'for' cleanly to time expressions in English."""
+    if language != "en":
+        return when_str
+    if when_str.startswith(("today at", "tomorrow at", "yesterday at")):
+        return f"for {when_str}"
+    return f"at {when_str}"
+
+
 def get_template(category: str, language: str = "en") -> str:
     lang_dict = REPLIES.get(language, REPLIES["en"])
     return lang_dict.get(category, REPLIES["en"][category])
 
 
 def _is_unparseable_guess(change: dict, language: str = "en") -> bool:
-    """Return True only for fallback guesses where the phrase couldn't be parsed at all.
-    For hi and kn batch replies, also returns True for guessed bare hours (e.g. 'gym around 6').
-    """
+    """Return True only for fallback guesses where the phrase couldn't be parsed at all."""
     note = change.get("resolution_note") or ""
-    if language in ("hi", "kn"):
-        if change.get("needs_confirmation"):
-            return True
-        return note.startswith("Could not parse") or "Guessed" in note
     return note.startswith("Could not parse")
 
 
 def format_created(changes: list, language: str = "en", now: Optional[datetime] = None) -> str:
-    """Format single or batch task creation/update confirmation."""
+    """Format single or batch task creation/update confirmation with rotating short variants."""
     from timeutil import format_when
     created = [c for c in changes if c.get("type") == "created"]
     updated = [c for c in changes if c.get("type") in ("updated", "updated_duplicate")]
@@ -111,41 +204,27 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
     if not created and not updated:
         return get_template("fallback_not_caught", language)
 
-    # All items
-    item_strings = []
-    for c in created:
-        when_str = format_when(c.get("due_at"), now=now, language=language) if c.get("due_at") else "now"
-        if language == "hi":
-            item_strings.append(f"{c['title']} {when_str}")
-        elif language == "kn":
-            item_strings.append(f"{c['title']} {when_str}")
-        else:
-            item_strings.append(f"{c['title']} for {when_str}")
-
-    for c in updated:
-        when_str = format_when(c.get("due_at"), now=now, language=language) if c.get("due_at") else "now"
-        if language == "hi":
-            item_strings.append(f"{c['title']} {when_str}")
-        elif language == "kn":
-            item_strings.append(f"{c['title']} {when_str}")
-        else:
-            item_strings.append(f"{c['title']} to {when_str}")
-
     count = len(created) + len(updated)
     if count == 1 and created:
         c = created[0]
         when_str = format_when(c.get("due_at"), now=now, language=language) if c.get("due_at") else "now"
-        # Use "guess" template if time was inferred (needs_confirmation due to vague/unparseable phrase)
         if c.get("needs_confirmation"):
-            tmpl = get_template("needs_confirmation_guess", language)
+            tmpl_list = NEEDS_CONF_GUESS_VARIANTS.get(language, NEEDS_CONF_GUESS_VARIANTS["en"])
+            v_idx = next_variant_index(len(tmpl_list))
+            return tmpl_list[v_idx].format(title=c["title"], time=when_str)
         else:
-            tmpl = get_template("created_single", language)
-        return tmpl.format(title=c["title"], time=when_str)
+            tmpl_list = CREATED_SINGLE_VARIANTS.get(language, CREATED_SINGLE_VARIANTS["en"])
+            v_idx = next_variant_index(len(tmpl_list))
+            time_phrase = _format_time_phrase(when_str, language)
+            return tmpl_list[v_idx].format(title=c["title"], time=when_str, time_phrase=time_phrase)
+
     elif count == 1 and updated:
         c = updated[0]
         when_str = format_when(c.get("due_at"), now=now, language=language) if c.get("due_at") else "now"
-        tmpl = get_template("updated", language)
-        return tmpl.format(title=c["title"], time=when_str)
+        tmpl_list = UPDATED_VARIANTS.get(language, UPDATED_VARIANTS["en"])
+        v_idx = next_variant_index(len(tmpl_list))
+        return tmpl_list[v_idx].format(title=c["title"], time=when_str)
+
     elif len(created) == 0 and len(updated) > 1:
         if language == "hi":
             return f"{count} रिमाइंडर अपडेट कर दिए गए हैं।"
@@ -153,10 +232,11 @@ def format_created(changes: list, language: str = "en", now: Optional[datetime] 
             return f"{count} ರಿಮೈಂಡರ್‌ಗಳನ್ನು ಬದಲಾಯಿಸಲಾಗಿದೆ."
         return f"Moved {count} reminders."
 
-    tmpl = get_template("created_multiple", language)
-    base = tmpl.format(count=count)
+    tmpl_list = CREATED_MULTIPLE_VARIANTS.get(language, CREATED_MULTIPLE_VARIANTS["en"])
+    v_idx = next_variant_index(len(tmpl_list))
+    base = tmpl_list[v_idx].format(count=count)
 
-    # Append a short spoken note for any unparseable-phrase guesses in the batch
+    # Append a short spoken note only if an unparseable phrase was present
     all_items = created + updated
     guess_items = [c for c in all_items if _is_unparseable_guess(c, language)]
     if guess_items:

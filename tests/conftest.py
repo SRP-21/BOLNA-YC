@@ -40,11 +40,13 @@ def reset_db_state():
     from agent.pending_action import clear_pending_action
     from agent.pending_choice import clear_pending_choice
     from agent.replan import set_pending_plan
+    from agent.replies import reset_variant_counter
     from db import SessionLocal, Utterance
 
     clear_pending_action()
     clear_pending_choice()
     set_pending_plan(None)
+    reset_variant_counter()
     session = SessionLocal()
     session.query(Utterance).delete()
     session.commit()
@@ -55,6 +57,7 @@ def reset_db_state():
     clear_pending_action()
     clear_pending_choice()
     set_pending_plan(None)
+    reset_variant_counter()
     session = SessionLocal()
     session.query(Utterance).delete()
     session.commit()

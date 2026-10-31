@@ -173,10 +173,10 @@ def test_template_integrations():
 
     # 1. Created single
     hi_created = format_created([{"type": "created", "title": "Doctor", "due_at": dt_9am.isoformat()}], language="hi", now=FROZEN_NOW)
-    assert "Doctor का रिमाइंडर कल सुबह 9 बजे सेट कर दिया गया है।" in hi_created
+    assert "Doctor" in hi_created and "कल सुबह 9 बजे" in hi_created
 
     kn_created = format_created([{"type": "created", "title": "Doctor", "due_at": dt_9am.isoformat()}], language="kn", now=FROZEN_NOW)
-    assert "Doctor ರಿಮೈಂಡರ್ ಅನ್ನು ನಾಳೆ ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆಗೆ ಹೊಂದಿಸಲಾಗಿದೆ." in kn_created
+    assert "Doctor" in kn_created and "ನಾಳೆ ಬೆಳಿಗ್ಗೆ 9 ಗಂಟೆಗೆ" in kn_created
 
     # 2. Updated
     hi_updated = format_rescheduled("Gym", format_when(dt_6pm, now=FROZEN_NOW, language="hi"), language="hi")

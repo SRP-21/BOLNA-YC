@@ -19,6 +19,75 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+WORD_NUMS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+}
+
+
+def normalize_time_phrase(phrase: str) -> str:
+    """Normalize Whisper time transcriptions (e.g., '5 p.m.', '6 o'clock', 'half past 5', 'five pm')
+    into standard clean time expressions before resolution."""
+    if not phrase:
+        return ""
+    p = phrase.strip()
+
+    # 1. Normalize p.m. / a.m. with optional spaces or dots
+    p = re.sub(r"(?i)\bp\.?\s*m\.?", "pm", p)
+    p = re.sub(r"(?i)\ba\.?\s*m\.?", "am", p)
+
+    # 2. Time of day expressions
+    p = re.sub(r"(?i)\bin\s+the\s+evening\b", "pm", p)
+    p = re.sub(r"(?i)\bin\s+the\s+morning\b", "am", p)
+    p = re.sub(r"(?i)\bin\s+the\s+afternoon\b", "pm", p)
+    p = re.sub(r"(?i)\bat\s+night\b", "pm", p)
+
+    # 3. Normalize o'clock / oclock
+    p = re.sub(r"(?i)\b(?:o'\s*clock|oclock|o’\s*clock)\b", "", p)
+
+    # 4. Half past / quarter past / quarter to
+    def repl_half_past(m):
+        raw_h = m.group(1).lower()
+        h = WORD_NUMS.get(raw_h, raw_h)
+        suffix = f" {m.group(2)}" if m.group(2) else ""
+        return f"{h}:30{suffix}"
+
+    p = re.sub(r"(?i)\bhalf\s+past\s+(\w+)(?:\s+(pm|am))?", repl_half_past, p)
+
+    def repl_quarter_past(m):
+        raw_h = m.group(1).lower()
+        h = WORD_NUMS.get(raw_h, raw_h)
+        suffix = f" {m.group(2)}" if m.group(2) else ""
+        return f"{h}:15{suffix}"
+
+    p = re.sub(r"(?i)\bquarter\s+past\s+(\w+)(?:\s+(pm|am))?", repl_quarter_past, p)
+
+    def repl_quarter_to(m):
+        raw_h = m.group(1).lower()
+        h = int(WORD_NUMS.get(raw_h, raw_h))
+        prev_h = 12 if h == 1 else h - 1
+        suffix = f" {m.group(2)}" if m.group(2) else ""
+        return f"{prev_h}:45{suffix}"
+
+    p = re.sub(r"(?i)\bquarter\s+to\s+(\w+)(?:\s+(pm|am))?", repl_quarter_to, p)
+
+    # 5. Spoken number words before am/pm or standalone hour
+    def repl_word_num(m):
+        w = m.group(1).lower()
+        num = WORD_NUMS.get(w)
+        if num is not None:
+            rest = m.group(2) or ""
+            return f"{num}{rest}"
+        return m.group(0)
+
+    p = re.sub(
+        r"(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(\s*(?:am|pm))?",
+        repl_word_num,
+        p,
+    )
+
+    return re.sub(r"\s+", " ", p).strip()
+
 
 class ResolvedTime:
     def __init__(self, dt: datetime, needs_confirmation: bool = False,
@@ -70,6 +139,7 @@ def resolve_time(
     if anchor_dt is not None:
         anchor_dt = ensure_ist(anchor_dt)
 
+    phrase = normalize_time_phrase(phrase)
     phrase_lower = phrase.lower().strip()
     original_phrase = phrase
 
@@ -138,17 +208,17 @@ def resolve_time(
             needs_conf = False
             reasoning = f"Resolved {hour:02d}:{minute:02d} from morning context"
         elif not time_match.group(2):
-            # Bare number like "6" with no AM/PM
+            # Bare number like "6" with no AM/PM (resolved to AM/PM without guess note or confirmation badge)
             if hour <= 7:
                 hour += 12
-                needs_conf = True
-                reasoning = f"Guessed PM for bare '{hour-12}' (assumed evening)"
+                needs_conf = False
+                reasoning = f"Resolved {hour:02d}:00 (assumed evening PM)"
             elif hour >= 9:
                 needs_conf = False
-                reasoning = f"Assumed AM for '{hour}'"
+                reasoning = f"Resolved {hour:02d}:00 (assumed morning AM)"
             else:  # 8
-                needs_conf = True
-                reasoning = f"Ambiguous: '{hour}' could be AM or PM"
+                needs_conf = False
+                reasoning = f"Resolved {hour:02d}:00 (assumed morning AM)"
         else:
             needs_conf = False
             reasoning = f"Exact time: {hour:02d}:{minute:02d}"

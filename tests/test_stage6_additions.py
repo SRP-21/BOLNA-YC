@@ -484,19 +484,17 @@ def test_hi_kn_batch_guess_notes_for_gym_and_unparseable():
     """
     from agent.replies import format_created
 
-    # 1. Gym around 6 (bare hour guess / needs_confirmation) in batch
+    # 1. Gym around 6 (bare hour / resolved time): under Stage 4, bare hours are not guesses to announce
     batch_gym = [
         {"type": "created", "title": "Standup", "due_at": "2026-10-31T10:00:00+05:30", "needs_confirmation": False},
-        {"type": "created", "title": "Gym", "due_at": "2026-10-31T18:00:00+05:30", "needs_confirmation": True, "resolution_note": "Guessed PM for bare '6' (assumed evening)"}
+        {"type": "created", "title": "Gym", "due_at": "2026-10-31T18:00:00+05:30", "needs_confirmation": False, "resolution_note": "Resolved 18:00 (assumed evening PM)"}
     ]
 
     reply_hi_gym = format_created(batch_gym, "hi", now=FROZEN_NOW)
-    assert "Gym का समय मुझे पता नहीं था" in reply_hi_gym
-    assert "अगर दूसरा समय चाहिए तो बताइए" in reply_hi_gym
+    assert "Gym का समय" not in reply_hi_gym
 
     reply_kn_gym = format_created(batch_gym, "kn", now=FROZEN_NOW)
-    assert "Gym ಸಮಯ ಗೊತ್ತಿಲ್ಲದ ಕಾರಣ" in reply_kn_gym
-    assert "ಬೇರೆ ಸಮಯ ಬೇಕಾದರೆ ತಿಳಿಸಿ" in reply_kn_gym
+    assert "Gym ಸಮಯ" not in reply_kn_gym
 
     # 2. Unparseable phrase in batch
     batch_unparse = [
